@@ -627,7 +627,7 @@ def generate_blueprint_html(bp_row, client_nom, ent):
 # 6. LIVRET D'ACCUEIL & GUIDE D'EXPLOITATION OFFICIEL THEMIS ERP (A4 / PDF)
 # ===========================================================================
 def generate_livret_accueil_html(ent):
-    """Génère le livret d'accueil imprimable reprenant toutes les fonctions de Themis."""
+    """Génère le livret d'accueil imprimable reprenant toutes les fonctions modernes de Themis."""
     ent_d = dict(ent) if hasattr(ent, "keys") else ent
     logo_html = get_logo_html()
 
@@ -635,12 +635,11 @@ def generate_livret_accueil_html(ent):
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif; padding: 30px; background: #FAF7F2; color: #2D3748; line-height: 1.6; }}
         .page {{ width: 210mm; min-height: 270mm; margin: auto; background: white; padding: 20mm; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.08); box-sizing: border-box; margin-bottom: 25px; page-break-after: always; }}
-        h1 {{ font-size: 20px; color: #1A365D; border-bottom: 2px solid #6E8A85; padding-bottom: 6px; margin-top: 0; }}
-        h2 {{ font-size: 15px; color: #2B6CB0; margin-top: 18px; border-bottom: 1px solid #E2E8F0; padding-bottom: 4px; }}
-        h3 {{ font-size: 13px; color: #22543D; margin-top: 12px; }}
-        p, li {{ font-size: 11.5px; text-align: justify; }}
-        .box {{ background: #F8FAFC; border: 1px solid #CBD5E0; border-radius: 6px; padding: 12px; margin: 12px 0; }}
-        @media print {{ body {{ background: transparent; padding: 0; }} .page {{ box-shadow: none; width: 100%; border: none; }} .no-print {{ display: none; }} }}
+        h1 {{ font-size: 19px; color: #1A365D; border-bottom: 2px solid #6E8A85; padding-bottom: 6px; margin-top: 0; }}
+        h2 {{ font-size: 14px; color: #2B6CB0; margin-top: 16px; border-bottom: 1px solid #E2E8F0; padding-bottom: 4px; }}
+        p, li {{ font-size: 11px; text-align: justify; }}
+        .box {{ background: #F8FAFC; border: 1px solid #CBD5E0; border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-size: 11px; }}
+        @media print {{ body {{ background: transparent; padding: 0; }} .page {{ box-shadow: none; width: 100%; border: none; margin: 0; }} .no-print {{ display: none; }} }}
     </style></head><body>
     <div class="no-print" style="text-align: center; margin-bottom: 20px;">
         <button onclick="window.print()" style="padding: 10px 25px; background: #6E8A85; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">🖨️ Imprimer ou Enregistrer le Livret en PDF</button>
@@ -648,50 +647,63 @@ def generate_livret_accueil_html(ent):
     
     <div class="page">
         {logo_html}
-        <h1>THEMIS ERP — LIVRET D'ACCUEIL & MANUEL D'EXPLOITATION</h1>
-        <p><strong>Édition Micro-Entreprise</strong> | Prestataire : {ent_d['nom']} | Version 3.0</p>
-        <hr style="border: 0; border-top: 1px solid #CBD5E0; margin: 15px 0;">
+        <h1>THEMIS ERP — MANUEL D'EXPLOITATION & LIVRET D'ACCUEIL</h1>
+        <p><strong>Édition Micro-Entreprise & B2B</strong> | Prestataire : {ent_d['nom']} | Version 3.5</p>
+        <hr style="border: 0; border-top: 1px solid #CBD5E0; margin: 12px 0;">
         
-        <h2>1. Philosophie & Piliers Fondateurs</h2>
-        <p>Themis ERP est conçu sur-mesure pour maîtriser l'activité d'une micro-entreprise de services numériques, de développement et d'automatisation. Il garantit la protection de vos marges, l'intégrité juridique de vos contrats et l'automatisation de vos déclarations sociales et fiscales.</p>
+        <h2>1. Philosophie & Piliers Juridiques</h2>
+        <p>Themis ERP est spécialement conçu pour sécuriser et automatiser l'activité des prestataires du numérique, ingénieurs et agences d'automatisation. Il verrouille la facturation et protège l'entreprise contre le travail non rémunéré et les décalages de trésorerie.</p>
         
-        <h2>2. Tableau de Bord & Pilotage Financier</h2>
+        <h2>2. Tableau de Bord & Radar de Vigilance Trésorerie</h2>
         <div class="box">
-            • <strong>Jauges Légales en Temps Réel :</strong> Surveillance permanente de la Franchise en base de TVA (36 800 €) et du Plafond de Chiffre d'Affaires BNC (77 700 €).<br>
-            • <strong>Échéancier Trimestriel T1-T4 :</strong> Calcul automatique et immédiat des cotisations URSSAF (21,2 %) et de l'Impôt sur le Revenu (2,2 %) sur les encaissements réels.<br>
-            • <strong>Double Rentabilité :</strong> Bénéfice net affiché en euros et en pourcentage de marge nette réelle.
+            • <strong>Radar de Vigilance en Temps Réel :</strong> Détecte immédiatement les acomptes non facturés, les soldes à émettre, les abonnements échus et les factures en retard.<br>
+            • <strong>Jauges Légales :</strong> Surveillance permanente de la Franchise en base de TVA (36 800 €) et du Plafond BNC (77 700 €).<br>
+            • <strong>Échéancier Trimestriel T1-T4 :</strong> Calcul en direct des cotisations URSSAF (21,2 %) et du versement libératoire IR (2,2 %) sur les encaissements réels.<br>
+            • <strong>Synchronisation Comptable :</strong> Le passage en « Facture Acquittée » alimente instantanément le Livre des Recettes ; un retour en « Facture Émise » purge immédiatement la ligne pour éviter toute fausse déclaration.
         </div>
 
-        <h2>3. Production & Kanban d'Ingénierie</h2>
-        <p>Le module de production vous permet de piloter vos réalisations sans outil tiers :</p>
+        <h2>3. Recouvrement Automatisé Make & Journal d'Audit</h2>
+        <p>Themis dispose d'un moteur de recouvrement graduel connecté à Make :</p>
         <ul>
-            <li><strong>Kanban 4 colonnes :</strong> À faire, En cours, En test, Terminé avec suivi du rendement horaire effectif (€/h).</li>
-            <li><strong>Scope-Shield :</strong> Bouclier anti-travail gratuit générant des avenants contractuels A4 instantanés lors de demandes hors-périmètre.</li>
-            <li><strong>Architecture Blueprint :</strong> Schématisation visuelle du pipeline de données à remettre au client avec la recette finale.</li>
-            <li><strong>Cockpit MCO :</strong> Journal d'exploitation mensuel justifiant la valeur de vos abonnements de maintenance.</li>
+            <li><strong>Rédaction Intégrale par Themis :</strong> Themis génère lui-même les courriers officiels en HTML stylisé (Niveau 1 : Rappel courtois, Niveau 2 : Pénalités L441-10 + 40 €, Niveau 3 : Mise en demeure avec suspension de contrat).</li>
+            <li><strong>Expédition Make & Accusé :</strong> Make reçoit l'email prêt à l'envoi et renvoie un accusé de réception instantané (200 OK).</li>
+            <li><strong>Journal des Relances :</strong> Suivi chronologique de chaque relance avec traçabilité de la <strong>Date d'acquittement</strong> effective et relecture de l'email expédié en un clic.</li>
         </ul>
+
+        <h2>4. Coordonnées Bancaires & Règlements</h2>
+        <p>Toutes les pièces commerciales (Devis, Bons de commande et Factures) intègrent un <strong>cartouche RIB officiel</strong> avec IBAN, BIC, Banque et mention automatique du libellé obligatoire pour garantir un paiement sans friction.</p>
     </div>
 
     <div class="page">
-        <h2>4. Cycle Commercial, Devis & CRM</h2>
+        <h2>5. Portefeuille Client 360° & Coffre-Fort de Secrets</h2>
         <div class="box">
-            • <strong>Portefeuille Client 360° :</strong> Vue intégrale des travaux livrés, abonnements et factures.<br>
-            • <strong>Annuaire CRM & Coffre-Fort de Secrets :</strong> Stockage chiffré des clés API clients et édition en 1 clic de l'Attestation de Révocation / Décharge RGPD.<br>
-            • <strong>Catalogue 8 Forfaits :</strong> Tarification pré-enregistrée réinjectable en 1 clic.<br>
-            • <strong>Calculateur de ROI Client :</strong> Démonstration chiffrée des économies annuelles et du délai d'amortissement imprimée sur le devis.
+            • <strong>Portefeuille Unifié :</strong> Vision instantanée du CA total encaissé (Valeur Vie / LTV), des abonnements mensuels actifs (€/mois) et de la santé comptable de chaque client.<br>
+            • <strong>Fiche Modale Popup 360° :</strong> Clic sur « Inspecter 360° » ouvrant immédiatement le dossier en 4 onglets : Travaux & Devis, Abonnements & MCO, Factures & Règlements, Clés API & Sécurité.<br>
+            • <strong>Décharge RGPD :</strong> Édition en 1 clic du protocole de restitution et de révocation des clés API en fin de mission.
         </div>
 
-        <h2>5. Sécurité Contractuelle, Coordonnées Bancaires & Facturation</h2>
-        <p>Themis applique un protocole d'engagement inviolable :</p>
+        <h2>6. Moteur Fiscal & Bascule TVA (Guadeloupe 8,5 % / Métropole 20 %)</h2>
+        <p>Themis s'adapte à la croissance de votre chiffre d'affaires :</p>
         <ul>
-            <li><strong>Dossier Contractuel 7 Pages :</strong> Devis, Bon de commande avec IBAN/BIC, CGV complètes (14 articles), PV de recette (3 réserves), Contrat SLA (9 articles), NDA (6 articles).</li>
-            <li><strong>Coordonnées Bancaires Intégrées :</strong> Cartouche RIB officiel imprimé sur devis, bons de commande et factures.</li>
-            <li><strong>Verrou d'Émission :</strong> Aucune facture ne peut être émise sans que le devis soit 'Validé & Signé' ET le contrat signé.</li>
-            <li><strong>Tampons Virtuels & Livre des Recettes :</strong> Application des tampons 'PAYÉE' / 'ANNULÉE' et synchronisation automatique avec le Livre des Recettes URSSAF.</li>
+            <li><strong>Franchise en Base (Défaut) :</strong> Application stricte de la mention légale <em>« TVA non applicable, art. 293 B du CGI »</em>.</li>
+            <li><strong>Bascule Assujetti en 1 clic :</strong> En cas de dépassement du seuil de 36 800 €, Themis calcule automatiquement le montant H.T., la TVA (8,5 % DOM Guadeloupe ou 20 % Métropole) et le Net à Payer T.T.C., avec affichage du N° de TVA Intracommunautaire.</li>
         </ul>
 
-        <div style="margin-top: 40px; border-top: 1px solid #CBD5E0; padding-top: 10px; font-size: 11px; color: #777;">
-            © Dhamusoft — Tous droits réservés • Guide d'exploitation Themis ERP.
+        <h2>7. Factur-X (Réforme 2026-2027) & Conformité Éditeur Art. 286 du CGI</h2>
+        <div class="box">
+            • <strong>Format Hybride Factur-X :</strong> Devant chaque facture, un bouton permet d'extraire le fichier XML normalisé (norme européenne CII) prêt pour Chorus Pro et le Portail Public de Facturation.<br>
+            • <strong>Attestation Éditeur Officielle :</strong> Génération de l'attestation formelle d'inaltérabilité, de sécurisation et de conservation au titre de l'Art. 286 du CGI pour vous prémunir de tout redressement lors d'un contrôle fiscal.
+        </div>
+
+        <h2>8. Sauvegarde Globale & Exports Comptables</h2>
+        <p>Protection absolue de vos données d'entreprise :</p>
+        <ul>
+            <li><strong>Sauvegarde ZIP en 1 Clic :</strong> Crée une archive autonome horodatée contenant la base SQLite (`devis_suivi.db`) et tous les scans de contrats signés.</li>
+            <li><strong>Exports Officiels Excel & CSV :</strong> Extraction du Livre des Recettes et du Registre des Dépenses au format normalisé de l'administration fiscale.</li>
+        </ul>
+
+        <div style="margin-top: 35px; border-top: 1px solid #CBD5E0; padding-top: 10px; font-size: 10.5px; color: #777;">
+            © Dhamusoft — Tous droits réservés • Guide d'exploitation Themis ERP Suite.
         </div>
     </div>
     </body></html>"""
