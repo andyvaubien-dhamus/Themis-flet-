@@ -3360,9 +3360,12 @@ def view_dossier_contractuel(page: ft.Page):
     ent = get_entreprise_info()
     conn.close()
 
+    default_devis = str(items.iloc[0]["numero_devis"]) if not items.empty else None
+
     dd_select = ft.Dropdown(
         label="Sélectionner le devis :",
         options=[ft.dropdown.Option(key=str(row[0]), text=f"{row[0]} — {row[1] or row[2]} ({'Signé ✅' if row[4] == 1 else 'Non signé ⚠️'})") for _, row in items.iterrows()],
+        value=default_devis,
         width=450,
     )
 
@@ -3431,6 +3434,11 @@ def view_dossier_contractuel(page: ft.Page):
         d = cursor.fetchone()
         conn.close()
 
+        if not d:
+            signature_status_box.visible = False
+            page.update()
+            return
+
         is_signe = (d[1] == 1)
         statut_devis = d[0]
 
@@ -3453,7 +3461,9 @@ def view_dossier_contractuel(page: ft.Page):
     dd_select.on_change = on_devis_change
 
     def mark_contract_signed(e):
-        if not dd_select.value: return
+        if not dd_select.value:
+            show_toast(page, "Veuillez sélectionner un devis d'abord.", is_error=True)
+            return
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
@@ -3477,7 +3487,8 @@ def view_dossier_contractuel(page: ft.Page):
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute("SELECT client_id FROM devis WHERE numero_devis = ?", (dd_select.value,))
-        cid = cursor.fetchone()[0]
+        cid_res = cursor.fetchone()
+        cid = cid_res[0] if cid_res else 1
 
         fname = f"{dd_select.value}_scan_{datetime.date.today().strftime('%Y%m%d%H%M%S')}_{os.path.basename(selected_file_path)}"
         dest_path = os.path.join(SCANS_DIR, fname)
@@ -3496,11 +3507,15 @@ def view_dossier_contractuel(page: ft.Page):
         show_toast(page, "Scan du contrat archivé avec succès dans le dossier client !")
         selected_file_path = None
         lbl_file_selected.value = "Aucun fichier de scan sélectionné."
+        lbl_file_selected.color = THEME["text_muted"]
         txt_scan_note.value = ""
         refresh_scans_history(dd_select.value)
 
     def print_dossier(e):
-        if not dd_select.value: return
+        if not dd_select.value:
+            show_toast(page, "Veuillez sélectionner un devis dans la liste déroulante.", is_error=True)
+            return
+
         conn = get_db()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -3508,13 +3523,23 @@ def view_dossier_contractuel(page: ft.Page):
         d = cursor.fetchone()
         conn.close()
 
-        html = generate_dossier_contractuel_html(d, ent)
-        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html", encoding="utf-8") as tf:
-            tf.write(html)
-            temp_path = tf.name
+        if not d:
+            show_toast(page, f"Devis {dd_select.value} introuvable.", is_error=True)
+            return
 
-        webbrowser.open(f"file://{temp_path}")
-        show_toast(page, "Dossier contractuel exhaustif (7P) ouvert pour impression.")
+        try:
+            html = generate_dossier_contractuel_html(d, ent)
+            with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html", encoding="utf-8") as tf:
+                tf.write(html)
+                temp_path = tf.name
+
+            webbrowser.open(f"file://{temp_path}")
+            show_toast(page, f"Dossier contractuel exhaustif (7P) ouvert pour {dd_select.value}.")
+        except Exception as ex:
+            show_toast(page, f"Erreur lors de la génération du dossier : {str(ex)}", is_error=True)
+
+    if default_devis:
+        on_devis_change(None)
 
     return ft.ListView(
         controls=[
