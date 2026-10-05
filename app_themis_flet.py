@@ -8,6 +8,7 @@ import sys
 import tempfile
 import webbrowser
 import base64
+import zipfile
 import flet as ft
 import pandas as pd
 
@@ -19,6 +20,8 @@ from contract_templates import (
     generate_revocation_secrets_html,
     generate_blueprint_html,
     generate_livret_accueil_html,
+    generate_attestation_conformite_html,  # <--- NOUVEAU
+    generate_facturx_xml,                 # <--- NOUVEAU 
 )
 
 # ---------------------------------------------------------------------------
@@ -89,7 +92,7 @@ PRIORITES = ["Basse", "Normale", "Haute", "Urgente"]
 
 
 # ---------------------------------------------------------------------------
-# Base de Données SQLite
+# Base de Données SQLite & Migration Automatique (Coordonnées Bancaires)
 # ---------------------------------------------------------------------------
 def get_db():
     return sqlite3.connect(DB_PATH)
@@ -178,7 +181,14 @@ def init_db():
             rcs_rm TEXT,
             forme_juridique TEXT,
             taux_urssaf REAL DEFAULT 21.2,
-            taux_ir REAL DEFAULT 2.2
+            taux_ir REAL DEFAULT 2.2,
+            iban TEXT,
+            bic TEXT,
+            banque_nom TEXT,
+            titulaire_compte TEXT,
+            assujetti_tva INTEGER DEFAULT 0,
+            taux_tva_defaut REAL DEFAULT 8.5,
+            numero_tva_intercom TEXT
         )
     """)
 
@@ -289,6 +299,27 @@ def init_db():
             FOREIGN KEY (projet_id) REFERENCES projets (id)
         )
     """)
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS relances_historique (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            numero_facture TEXT NOT NULL,
+            date_relance TEXT NOT NULL,
+            niveau INTEGER NOT NULL,
+            statut TEXT NOT NULL,
+            details TEXT,
+            corps_envoye TEXT
+        )
+    """)
+
+    for col in [
+        "taux_urssaf REAL DEFAULT 21.2", "taux_ir REAL DEFAULT 2.2",
+        "iban TEXT", "bic TEXT", "banque_nom TEXT", "titulaire_compte TEXT",
+        "webhook_make_relance TEXT",
+        "assujetti_tva INTEGER DEFAULT 0", "taux_tva_defaut REAL DEFAULT 8.5", "numero_tva_intercom TEXT"
+    ]:
+        try: cursor.execute(f"ALTER TABLE entreprise ADD COLUMN {col}")
+        except sqlite3.OperationalError: pass
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS documents_clients (
@@ -316,16 +347,19 @@ def init_db():
         try: cursor.execute(f"ALTER TABLE factures ADD COLUMN {col}")
         except sqlite3.OperationalError: pass
 
-    for col in ["taux_urssaf REAL DEFAULT 21.2", "taux_ir REAL DEFAULT 2.2"]:
+    for col in [
+        "taux_urssaf REAL DEFAULT 21.2", "taux_ir REAL DEFAULT 2.2",
+        "iban TEXT", "bic TEXT", "banque_nom TEXT", "titulaire_compte TEXT"
+    ]:
         try: cursor.execute(f"ALTER TABLE entreprise ADD COLUMN {col}")
         except sqlite3.OperationalError: pass
 
     cursor.execute(
         """
-        INSERT OR IGNORE INTO entreprise (id, nom, adresse, siret, rcs_rm, forme_juridique, taux_urssaf, taux_ir)
-        VALUES (1, ?, ?, '', '', '', 21.2, 2.2)
+        INSERT OR IGNORE INTO entreprise (id, nom, adresse, siret, rcs_rm, forme_juridique, taux_urssaf, taux_ir, iban, bic, banque_nom, titulaire_compte)
+        VALUES (1, ?, ?, '', '', '', 21.2, 2.2, '', '', '', ?)
         """,
-        (DEFAULT_ENTREPRISE_NOM, DEFAULT_ENTREPRISE_ADRESSE),
+        (DEFAULT_ENTREPRISE_NOM, DEFAULT_ENTREPRISE_ADRESSE, DEFAULT_ENTREPRISE_NOM),
     )
 
     catalogue_officiel = [
@@ -358,7 +392,6 @@ def init_db():
 
 
 def sanitize_tag(text: str) -> str:
-    """Nettoie le nom de l'entreprise ou du client pour l'intégrer au numéro de facture."""
     if not text:
         return "CLIENT"
     clean = re.sub(r"[^a-zA-Z0-9]", "", text.strip().upper())
@@ -409,7 +442,12 @@ def get_next_avenant(devis_num):
 def get_entreprise_info():
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT nom, adresse, siret, rcs_rm, forme_juridique, taux_urssaf, taux_ir FROM entreprise WHERE id = 1")
+    cursor.execute("""
+        SELECT nom, adresse, siret, rcs_rm, forme_juridique, taux_urssaf, taux_ir, 
+               iban, bic, banque_nom, titulaire_compte, webhook_make_relance,
+               assujetti_tva, taux_tva_defaut, numero_tva_intercom 
+        FROM entreprise WHERE id = 1
+    """)
     row = cursor.fetchone()
     conn.close()
     if row:
@@ -421,8 +459,20 @@ def get_entreprise_info():
             "forme_juridique": row[4] or "Non renseigné",
             "taux_urssaf": float(row[5]) if row[5] is not None else 21.2,
             "taux_ir": float(row[6]) if row[6] is not None else 2.2,
+            "iban": row[7] or "",
+            "bic": row[8] or "",
+            "banque_nom": row[9] or "",
+            "titulaire_compte": row[10] or (row[0] or ""),
+            "webhook_make_relance": row[11] or "",
+            "assujetti_tva": int(row[12] or 0),
+            "taux_tva_defaut": float(row[13] if row[13] is not None else 8.5),
+            "numero_tva_intercom": row[14] or "",
         }
-    return {"nom": "", "adresse": "", "siret": "Non renseigné", "rcs_rm": "Non renseigné", "forme_juridique": "Non renseigné", "taux_urssaf": 21.2, "taux_ir": 2.2}
+    return {
+        "nom": "", "adresse": "", "siret": "Non renseigné", "rcs_rm": "Non renseigné", "forme_juridique": "Non renseigné",
+        "taux_urssaf": 21.2, "taux_ir": 2.2, "iban": "", "bic": "", "banque_nom": "", "titulaire_compte": "",
+        "webhook_make_relance": "", "assujetti_tva": 0, "taux_tva_defaut": 8.5, "numero_tva_intercom": ""
+    }
 
 
 def get_app_logo_base64():
@@ -536,6 +586,31 @@ def execute_print_facture(numero_facture, page: ft.Page):
     elif statut in ["Facture Annulée", "Annulée"]:
         stamp_html = '<div style="position: absolute; top: 120px; right: 50px; transform: rotate(-14deg); border: 3px solid #C53030; color: #C53030; font-size: 26px; font-weight: 800; padding: 6px 20px; border-radius: 8px; opacity: 0.85; letter-spacing: 2px;">ANNULÉE</div>'
 
+    montant_ht = float(f["montant_ht"])
+    is_tva = (ent.get("assujetti_tva") == 1)
+    taux_tva = float(ent.get("taux_tva_defaut") or 8.5)
+
+    if is_tva:
+        montant_tva = montant_ht * (taux_tva / 100.0)
+        net_a_payer = montant_ht + montant_tva
+        lignes_totaux_html = f"""
+        <table style="width: 45%; float: right; margin-top: 15px; border-collapse: collapse;">
+            <tr><td style="border: 1px solid #CBD5E0; padding: 6px 10px;">Total H.T. :</td><td style="border: 1px solid #CBD5E0; padding: 6px 10px; text-align: right; font-weight: bold;">{montant_ht:.2f} €</td></tr>
+            <tr><td style="border: 1px solid #CBD5E0; padding: 6px 10px;">TVA ({taux_tva:.1f}%) :</td><td style="border: 1px solid #CBD5E0; padding: 6px 10px; text-align: right; font-weight: bold;">{montant_tva:.2f} €</td></tr>
+            <tr style="background: #E7EEE6;"><th style="border: 1px solid #CBD5E0; padding: 8px 10px; text-align: left; font-size: 13px;">NET À PAYER (TTC) :</th><th style="border: 1px solid #CBD5E0; padding: 8px 10px; text-align: right; font-size: 14px; color: #1A365D;">{net_a_payer:.2f} €</th></tr>
+        </table>
+        <div style="clear: both;"></div>
+        """
+        mention_fiscale = f"TVA acquittée au taux légal de {taux_tva:.1f} %."
+        tva_intercom_header = f"<br>N° TVA Intracommunautaire : {ent.get('numero_tva_intercom') or 'En cours d\'attribution'}"
+    else:
+        net_a_payer = montant_ht
+        lignes_totaux_html = f"""
+        <h3 style="text-align: right; margin-top: 15px;">NET À PAYER : {net_a_payer:.2f} €</h3>
+        """
+        mention_fiscale = "TVA non applicable, art. 293 B du CGI (Franchise en base de TVA)."
+        tva_intercom_header = ""
+
     html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Facture_{f['numero_facture']}</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif; padding: 30px; background: #FAF7F2; color: #333; }}
@@ -543,6 +618,7 @@ def execute_print_facture(numero_facture, page: ft.Page):
         table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
         th, td {{ border: 1px solid #CBD5E0; padding: 8px 10px; font-size: 12px; }}
         th {{ background: #E7EEE6; }}
+        .rib-box {{ margin-top: 25px; padding: 12px 16px; background: #F8FAFC; border: 1px solid #CBD5E0; border-radius: 6px; font-size: 11.5px; }}
         @media print {{ body {{ background: transparent; padding: 0; }} .page {{ box-shadow: none; width: 100%; border: none; }} .no-print {{ display: none; }} }}
     </style></head><body>
     <div class="no-print" style="text-align: center; margin-bottom: 20px;">
@@ -551,17 +627,27 @@ def execute_print_facture(numero_facture, page: ft.Page):
     <div class="page">
         {stamp_html}
         <h2>{ent['nom']}</h2>
-        <p>{ent['adresse']}<br>SIRET : {ent['siret']}</p>
+        <p>{ent['adresse']}<br>SIRET : {ent['siret']}{tva_intercom_header}</p>
         <hr>
         <h1>{f['type_facture'].upper()} N° {f['numero_facture']}</h1>
         <p>Date : {f['date_facture']} | Devis de référence : {f['numero_devis']}</p>
         <p><strong>Facturé à :</strong> {f['client_societe'] or 'Particulier'} ({f['client_prenom']} {f['client_nom']})<br>{f['client_adresse']}</p>
         <table>
             <tr><th>Désignation</th><th style="text-align: right;">Montant HT</th></tr>
-            <tr><td>{f['type_facture']} — Devis {f['numero_devis']}</td><td style="text-align: right;">{float(f['montant_ht']):.2f} €</td></tr>
+            <tr><td>{f['type_facture']} — Devis {f['numero_devis']}</td><td style="text-align: right;">{montant_ht:.2f} €</td></tr>
         </table>
-        <h3 style="text-align: right;">NET À PAYER : {float(f['montant_ht']):.2f} €</h3>
-        <p style="font-size: 10px; color: #777;">TVA non applicable, art. 293 B du CGI. Pénalités de retard applicables de plein droit selon art. L441-10 du Code de Commerce. Indemnité forfaitaire de recouvrement : 40 €.</p>
+        
+        {lignes_totaux_html}
+        
+        <!-- Cartouche bancaire officiel -->
+        <div class="rib-box">
+            <h4 style="margin: 0 0 6px 0; color: #1A365D; font-size: 12px;">MODALITÉS DE RÈGLEMENT PAR VIREMENT BANCAIRE</h4>
+            <p style="margin: 2px 0;"><strong>Banque :</strong> {ent['banque_nom'] or 'Établissement Bancaire'} | <strong>Titulaire :</strong> {ent['titulaire_compte'] or ent['nom']}</p>
+            <p style="margin: 2px 0;"><strong>IBAN :</strong> <code style="font-size: 12px; font-weight: bold; color: #2B6CB0;">{ent['iban'] or 'Non renseigné dans les paramètres'}</code> | <strong>BIC :</strong> <code style="font-size: 12px; font-weight: bold; color: #2B6CB0;">{ent['bic'] or 'Non renseigné'}</code></p>
+            <p style="margin: 4px 0 0 0; font-size: 10px; color: #666;"><em>Merci d'indiquer obligatoirement la référence <strong>{f['numero_facture']}</strong> dans le libellé de votre virement bancaire.</em></p>
+        </div>
+
+        <p style="font-size: 10px; color: #777; margin-top: 25px;">{mention_fiscale} Pénalités de retard applicables de plein droit selon art. L441-10 du Code de Commerce. Indemnité forfaitaire de recouvrement : 40 €.</p>
     </div>
     </body></html>"""
 
@@ -570,14 +656,13 @@ def execute_print_facture(numero_facture, page: ft.Page):
         temp_path = tf.name
 
     webbrowser.open(f"file://{temp_path}")
-    show_toast(page, f"Facture {numero_facture} ouverte pour impression.")
+    show_toast(page, f"Facture {numero_facture} ouverte pour impression (Régime : {'TVA ' + str(taux_tva) + '%' if is_tva else 'Franchise 293 B'}).")
 
 
 # ---------------------------------------------------------------------------
 # Moteur de Détection des Anomalies & Abonnements Dus
 # ---------------------------------------------------------------------------
 def check_anomalies_facturation():
-    """Scanne la base pour détecter les décalages de compte et les factures d'abonnements manquantes."""
     today = datetime.date.today()
     today_str = today.strftime("%Y-%m-%d")
     current_month_str = today.strftime("%Y-%m")
@@ -669,6 +754,156 @@ def check_anomalies_facturation():
     return anomalies
 
 
+import urllib.request
+import urllib.error
+
+def generate_relance_email_content(item_facture, next_level, ent):
+    """Génère le sujet et le corps (HTML stylisé et texte brut) directement dans Themis."""
+    client = item_facture["client"]
+    f_num = item_facture["numero_facture"]
+    montant = f"{item_facture['montant']:.2f}"
+    echeance = item_facture["date_echeance"]
+    banque = ent.get("banque_nom") or "Établissement Bancaire"
+    titulaire = ent.get("titulaire_compte") or ent.get("nom")
+    iban = ent.get("iban") or "Non renseigné"
+    bic = ent.get("bic") or "Non renseigné"
+
+    bloc_rib_html = f"""
+    <div style="background-color: #F8FAFC; border: 1px solid #CBD5E0; border-radius: 6px; padding: 14px; margin: 15px 0; font-family: sans-serif;">
+        <strong style="color: #1A365D;">COORDONNÉES POUR LE VIREMENT BANCAIRE :</strong><br>
+        • <strong>Banque :</strong> {banque}<br>
+        • <strong>Titulaire :</strong> {titulaire}<br>
+        • <strong>IBAN :</strong> <code style="font-size: 13px; font-weight: bold; color: #2B6CB0;">{iban}</code><br>
+        • <strong>BIC :</strong> <code style="font-size: 13px; font-weight: bold; color: #2B6CB0;">{bic}</code><br>
+        • <strong>Libellé obligatoire :</strong> <strong>{f_num}</strong>
+    </div>
+    """
+
+    if next_level == 1:
+        sujet = f"Rappel amical : Facture {f_num} échue le {echeance}"
+        corps_html = f"""
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333333; max-width: 650px;">
+            <p>Bonjour {client},</p>
+            <p>Sauf erreur ou retard d'enregistrement de notre part, nous constatons que la facture <strong>{f_num}</strong> d'un montant de <strong>{montant} €</strong>, arrivée à échéance le {echeance}, est toujours en attente de règlement.</p>
+            <p>Si votre virement a déjà été émis ces dernières 48 heures, nous vous prions de ne pas tenir compte de ce rappel.</p>
+            <p>Dans le cas contraire, vous trouverez ci-dessous nos coordonnées pour procéder à la régularisation :</p>
+            {bloc_rib_html}
+            <p>Nous restons à votre entière disposition si vous avez la moindre question.</p>
+            <p>Bien cordialement,<br><strong>{titulaire}</strong><br><span style="font-size: 11px; color: #777;">{ent['nom']}</span></p>
+        </div>
+        """
+        corps_texte = f"Bonjour {client},\n\nLa facture {f_num} de {montant} € échue le {echeance} est en attente. Merci de virer sur IBAN: {iban} (Libellé: {f_num}).\n\nCordialement,\n{titulaire}"
+
+    elif next_level == 2:
+        sujet = f"2ème Relance : Retard de paiement persistant sur Facture {f_num}"
+        corps_html = f"""
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333333; max-width: 650px;">
+            <p>Bonjour {client},</p>
+            <p>Malgré notre précédent message, nous n'avons toujours pas réceptionné le règlement de la facture <strong>{f_num}</strong> d'un montant de <strong>{montant} €</strong> échue depuis le {echeance}.</p>
+            <p style="background: #FFF5F5; border-left: 4px solid #E53E3E; padding: 10px 14px; font-size: 12px; color: #742A2A;">
+                Conformément aux dispositions de l'article L441-10 du Code de commerce et à l'article 3 de nos CGV, tout retard de paiement rend exigibles de plein droit des pénalités de retard au taux légal ainsi qu'une indemnité forfaitaire pour frais de recouvrement de <strong>40,00 €</strong>.
+            </p>
+            <p>Nous vous remercions de bien vouloir régulariser cette somme dans les plus brefs délais :</p>
+            {bloc_rib_html}
+            <p>Dans l'attente de votre confirmation de virement,</p>
+            <p>Sincères salutations,<br><strong>{titulaire}</strong><br><span style="font-size: 11px; color: #777;">{ent['nom']}</span></p>
+        </div>
+        """
+        corps_texte = f"Bonjour {client},\n\n2ème relance Facture {f_num} de {montant} €. En retard depuis le {echeance}. Indemnité de 40€ applicable selon art. L441-10. Merci de régulariser sur IBAN: {iban}.\n\n{titulaire}"
+
+    else:
+        sujet = f"MISE EN DEMEURE : Impayé persistant Facture {f_num}"
+        corps_html = f"""
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333333; max-width: 650px;">
+            <p><strong>Monsieur / Madame,</strong></p>
+            <p>Malgré nos multiples relances amiables restées infructueuses, la facture <strong>{f_num}</strong> d'un montant de <strong>{montant} €</strong> demeure impayée à ce jour.</p>
+            <p style="border: 2px solid #C53030; background: #FFF5F5; padding: 12px 16px; border-radius: 6px; font-weight: bold; color: #9B2C2C;">
+                Par la présente, nous vous mettons formellement en demeure de régler la somme de {montant} € sous un délai impératif de 8 jours ouvrés à compter de la réception de cet email.
+            </p>
+            <p>À défaut de réception des fonds sur le compte ci-dessous à cette échéance :</p>
+            <ul>
+                <li>L'accès à l'ensemble de vos flux automatisés, serveurs et contrats de maintenance (SLA) sera suspendu sans préavis (Art. 5 du contrat).</li>
+                <li>Le dossier sera transmis à notre cabinet de contentieux judiciaire pour injonction de payer.</li>
+            </ul>
+            {bloc_rib_html}
+            <p>Comptant sur votre diligence pour clore cet incident à l'amiable.</p>
+            <p><strong>Le Responsable Juridique & Financier</strong><br>{ent['nom']}</p>
+        </div>
+        """
+        corps_texte = f"MISE EN DEMEURE : Facture {f_num} de {montant} €. Délai impératif de 8 jours pour régler sur IBAN: {iban}. À défaut, suspension des flux applicatifs et transmission au contentieux.\n\n{ent['nom']}"
+
+    return sujet, corps_html, corps_texte
+
+
+def dispatch_relance_make(item_facture, next_level, page: ft.Page):
+    """Génère le texte complet et transmet le payload prêt à expédier à Make."""
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT client_email, client_telephone FROM devis WHERE numero_devis = ?", (item_facture["numero_devis"],))
+    d_row = cursor.fetchone()
+    c_email = d_row["client_email"] if d_row else ""
+    c_tel = d_row["client_telephone"] if d_row else ""
+
+    if not c_email:
+        conn.close()
+        show_toast(page, "Aucune adresse email enregistrée pour ce client sur son devis.", is_error=True)
+        return
+
+    ent = get_entreprise_info()
+    webhook_url = ent.get("webhook_make_relance", "").strip()
+
+    if not webhook_url:
+        conn.close()
+        show_toast(page, "Configurez d'abord l'URL du Webhook Make dans 'Paramètres' !", is_error=True)
+        return
+
+    # Rédaction du mail par Themis
+    sujet, corps_html, corps_texte = generate_relance_email_content(item_facture, next_level, ent)
+
+    payload = {
+        "event": "relance_facture_impayee",
+        "niveau_relance": next_level,
+        "destinataire": c_email,
+        "sujet": sujet,
+        "corps_html": corps_html,
+        "corps_texte": corps_texte,
+        "numero_facture": item_facture["numero_facture"],
+        "client_nom": item_facture["client"],
+        "client_telephone": c_tel,
+        "montant_ht": item_facture["montant"],
+        "date_echeance": item_facture["date_echeance"],
+        "date_declenchement": str(datetime.date.today()),
+        "iban": ent.get("iban", ""),
+        "bic": ent.get("bic", ""),
+    }
+
+    try:
+        req = urllib.request.Request(
+            webhook_url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "User-Agent": "Themis-ERP/3.0"}
+        )
+        with urllib.request.urlopen(req, timeout=12) as response:
+            resp_body = response.read().decode("utf-8")
+
+        cursor.execute(
+            """
+            INSERT INTO relances_historique (numero_facture, date_relance, niveau, statut, details, corps_envoye)
+            VALUES (?, ?, ?, 'Envoyé via Make', ?, ?)
+            """,
+            (item_facture["numero_facture"], str(datetime.date.today()), next_level, resp_body[:200], corps_html)
+        )
+        conn.commit()
+        conn.close()
+        show_toast(page, f"Relance N°{next_level} envoyée avec succès à {c_email} !")
+        page.go("/dashboard")
+    except Exception as ex:
+        conn.close()
+        show_toast(page, f"Échec transmission Make : {str(ex)}", is_error=True)
+
+
 def build_radar_vigilance(page: ft.Page):
     ano = check_anomalies_facturation()
     nb_retards = len(ano["factures_en_retard"])
@@ -693,22 +928,43 @@ def build_radar_vigilance(page: ft.Page):
             padding=ft.padding.symmetric(horizontal=16, vertical=12),
         )
 
+    conn = get_db()
+    cursor = conn.cursor()
+
     items_ui = []
 
     for r in ano["factures_en_retard"]:
+        f_num = r["numero_facture"]
+        cursor.execute("SELECT niveau, date_relance FROM relances_historique WHERE numero_facture = ? ORDER BY id DESC LIMIT 1", (f_num,))
+        rel_info = cursor.fetchone()
+
+        if rel_info:
+            last_lvl, last_date = rel_info[0], rel_info[1]
+            badge_relance = f"✉️ N{last_lvl} envoyé le {last_date}"
+            next_lvl = min(last_lvl + 1, 3)
+            btn_txt = f"🚀 Relancer N{next_lvl} (Make)"
+        else:
+            badge_relance = "Non relancé"
+            next_lvl = 1
+            btn_txt = "🚀 Relance N1 (Make)"
+
         items_ui.append(
             ft.Row([
                 ft.Row([
                     ft.Container(content=ft.Text("IMPAYÉ / RETARD", size=10, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE), bgcolor=ft.colors.RED_700, border_radius=4, padding=ft.padding.symmetric(horizontal=6, vertical=3)),
                     ft.Text(f"{r['numero_facture']} ({r['client']})", weight=ft.FontWeight.BOLD, size=12),
                     ft.Text(f"Échue le {r['date_echeance']}", size=11, color=ft.colors.RED_800, italic=True),
-                ], spacing=10),
+                    ft.Container(content=ft.Text(badge_relance, size=10, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]), bgcolor=THEME["sage_pale"], border_radius=4, padding=ft.padding.symmetric(horizontal=6, vertical=2)),
+                ], spacing=8),
                 ft.Row([
                     ft.Text(f"{r['montant']:.2f} € HT", weight=ft.FontWeight.BOLD, size=13, color=ft.colors.RED_800),
+                    ft.ElevatedButton(btn_txt, height=30, bgcolor=ft.colors.PURPLE_800, color=ft.colors.WHITE, on_click=lambda e, item=r, lvl=next_lvl: dispatch_relance_make(item, lvl, page)),
                     ft.ElevatedButton("Acquitter / Voir", height=30, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=lambda e: page.go("/facturation_print")),
-                ], spacing=10),
+                ], spacing=8),
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
         )
+
+    conn.close()
 
     for ab in ano["abonnements_dus"]:
         items_ui.append(
@@ -1066,8 +1322,9 @@ def view_livret_accueil(page: ft.Page):
                         ]
                     ),
                     guide_section(
-                        "5. Facturation & Verrous Juridiques", "⚖️",
+                        "5. Facturation, Règlements & Coordonnées Bancaires", "⚖️",
                         [
+                            ft.Text("• Coordonnées Bancaires (IBAN/BIC) : Cartouche officiel imprimé sur factures, devis et bons de commande.", size=12),
                             ft.Text("• Règle d'or de Themis : Aucune facture ne peut être émise sans devis validé et contrat formellement signé.", size=12),
                             ft.Text("• Naming Explicite : Chaque facture porte la référence du client et le type pour éliminer tout risque d'erreur comptable.", size=12),
                             ft.Text("• Abonnements Récurrents : Gestion de l'échéance mensuelle automatique synchronisée avec le radar de trésorerie.", size=12),
@@ -1453,7 +1710,6 @@ def view_crm_clients(page: ft.Page):
         }
 
     def open_client_360_modal(cid):
-        """Ouvre directement la fiche 360° du client dans une fenêtre modale centrée."""
         conn = get_db()
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
@@ -1487,7 +1743,6 @@ def view_crm_clients(page: ft.Page):
 
         conn.close()
 
-        # 1. Onglet Travaux
         travaux_cards = []
         for p in projets_list:
             travaux_cards.append(
@@ -1508,7 +1763,6 @@ def view_crm_clients(page: ft.Page):
             ft.Column(travaux_cards if travaux_cards else [ft.Text("Aucun projet enregistré.", italic=True)]),
         ], spacing=8, expand=True)
 
-        # 2. Onglet Abonnements
         mco_rows = [
             ft.DataRow(cells=[
                 ft.DataCell(ft.Text(m["mois"], weight=ft.FontWeight.BOLD)),
@@ -1526,7 +1780,6 @@ def view_crm_clients(page: ft.Page):
             ) if mco_rows else ft.Text("Aucun historique de maintenance saisi.", italic=True),
         ], spacing=8, expand=True)
 
-        # 3. Onglet Facturation
         tot_facture = sum(float(f["montant_ht"]) for f in factures_list)
         tot_regle = sum(float(f["montant_ht"]) for f in factures_list if f["statut"] in ["Facture Acquittée", "Payée"])
         tab_factures = ft.ListView([
@@ -1549,7 +1802,6 @@ def view_crm_clients(page: ft.Page):
             ) if factures_list else ft.Text("Aucune facture émise.", italic=True),
         ], spacing=8, expand=True)
 
-        # 4. Onglet Secrets & Décharge RGPD
         tab_secrets = ft.ListView([
             ft.Row([
                 ft.Text("Accès techniques & Habilitations", weight=ft.FontWeight.BOLD, size=13),
@@ -1586,20 +1838,13 @@ def view_crm_clients(page: ft.Page):
                 ft.Container(content=ft.Text("360°", size=11, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE), bgcolor=THEME["sage_dark"], border_radius=6, padding=ft.padding.symmetric(horizontal=8, vertical=4)),
                 ft.Text(f"Fiche Client : {nom_display}", size=18, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
             ], spacing=10),
-            content=ft.Container(
-                content=detail_tabs,
-                width=820,
-                height=480,
-            ),
-            actions=[
-                ft.TextButton("Fermer", on_click=lambda e: close_dialog(dlg_360)),
-            ],
+            content=ft.Container(content=detail_tabs, width=820, height=480),
+            actions=[ft.TextButton("Fermer", on_click=lambda e: close_dialog(dlg_360))],
             actions_alignment=ft.MainAxisAlignment.END,
         )
 
         def close_dialog(d):
-            if hasattr(page, "close"):
-                page.close(d)
+            if hasattr(page, "close"): page.close(d)
             else:
                 d.open = False
                 page.update()
@@ -1722,9 +1967,7 @@ def view_crm_clients(page: ft.Page):
             create_header("👥", "Portefeuille Clients & Fiches 360°", "Vue unifiée des travaux réalisés, abonnements actifs et santé comptable"),
             create_card(
                 ft.Column([
-                    ft.Row([
-                        txt_recherche,
-                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ft.Row([txt_recherche], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                     portefeuille_table_container,
                 ], spacing=14),
                 padding=16,
@@ -2527,6 +2770,138 @@ def view_factures(page: ft.Page):
         ft.ElevatedButton("Émettre l'avoir officiel", icon=ft.icons.CREDIT_CARD_ROUNDED, bgcolor=THEME["blush_dark"], color=ft.colors.WHITE, on_click=create_avoir),
     ], spacing=16)
 
+    # --- MODE 4 : JOURNAL DES RELANCES & RECOUVREMENT AVEC AUTO-MIGRATION ---
+    def open_email_reader(r_row):
+        dlg = ft.AlertDialog(
+            title=ft.Row([
+                ft.Icon(ft.icons.MARK_EMAIL_READ_ROUNDED, color=THEME["sage_dark"]),
+                ft.Text(f"Copie Conforme Relance N°{r_row['niveau']} — {r_row['numero_facture']}", size=15, weight=ft.FontWeight.BOLD),
+            ], spacing=8),
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Text(f"Date d'envoi : {r_row['date_relance']} | Client : {r_row['client_societe'] or r_row['client_nom']}", size=11, color=THEME["text_muted"], weight=ft.FontWeight.BOLD),
+                    ft.Divider(height=10),
+                    ft.Text(r_row["corps_envoye"] or "Texte non archivé pour cette relance.", size=12, selectable=True),
+                ], scroll=ft.ScrollMode.AUTO, spacing=10),
+                width=650,
+                height=380,
+                padding=12,
+            ),
+            actions=[ft.TextButton("Fermer", on_click=lambda e: close_dlg(dlg))],
+        )
+
+        def close_dlg(d):
+            if hasattr(page, "close"): page.close(d)
+            else:
+                d.open = False
+                page.update()
+
+        if hasattr(page, "open"): page.open(dlg)
+        else:
+            page.dialog = dlg
+            dlg.open = True
+            page.update()
+
+    def build_journal_relances_view():
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+
+        # Auto-migration de sécurité : ajoute la colonne corps_envoye si elle n'existe pas encore
+        try:
+            c.execute("ALTER TABLE relances_historique ADD COLUMN corps_envoye TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        c.execute("""
+            SELECT r.id, r.numero_facture, r.date_relance, r.niveau, r.statut AS statut_relance, r.corps_envoye,
+                   f.montant_ht, f.statut AS statut_facture, f.date_echeance,
+                   d.client_societe, d.client_nom, d.client_prenom,
+                   p.date_paiement
+            FROM relances_historique r
+            JOIN factures f ON r.numero_facture = f.numero_facture
+            JOIN devis d ON f.numero_devis = d.numero_devis
+            LEFT JOIN paiements p ON f.numero_facture = p.numero_facture
+            ORDER BY r.id DESC
+        """)
+        relances = c.fetchall()
+        conn.close()
+
+        total_relances = len(relances)
+        total_recouvre = sum(float(r["montant_ht"]) for r in relances if r["statut_facture"] in ["Facture Acquittée", "Payée"])
+
+        rows = []
+        for r in relances:
+            is_acquittee = (r["statut_facture"] in ["Facture Acquittée", "Payée"])
+            c_nom = r["client_societe"] or f"{r['client_prenom']} {r['client_nom']}"
+
+            badge_acquittement = ft.Container(
+                content=ft.Text(f"Acquittée le {r['date_paiement'] or 'Enregistrée'}" if is_acquittee else "En attente ⏳", size=11, weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800 if is_acquittee else ft.colors.RED_800),
+                bgcolor=ft.colors.GREEN_50 if is_acquittee else ft.colors.RED_50,
+                border_radius=6,
+                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+            )
+
+            badge_niveau = ft.Container(
+                content=ft.Text(f"Niveau {r['niveau']}", size=11, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
+                bgcolor=THEME["sage_dark"] if r["niveau"] == 1 else (ft.colors.ORANGE_800 if r["niveau"] == 2 else ft.colors.RED_800),
+                border_radius=6,
+                padding=ft.padding.symmetric(horizontal=8, vertical=3),
+            )
+
+            rows.append(
+                ft.DataRow(cells=[
+                    ft.DataCell(ft.Text(r["date_relance"])),
+                    ft.DataCell(ft.Text(r["numero_facture"], weight=ft.FontWeight.BOLD)),
+                    ft.DataCell(ft.Text(c_nom)),
+                    ft.DataCell(badge_niveau),
+                    ft.DataCell(ft.Text(f"{float(r['montant_ht']):.2f} €")),
+                    ft.DataCell(badge_acquittement),
+                    ft.DataCell(
+                        ft.ElevatedButton(
+                            "👁️ Relire l'email",
+                            icon=ft.icons.VISIBILITY_OUTLINED,
+                            height=30,
+                            bgcolor=THEME["sage"],
+                            color=ft.colors.WHITE,
+                            on_click=lambda e, row=r: open_email_reader(row),
+                        )
+                    ),
+                ])
+            )
+
+        table_journal = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("Date Relance")),
+                ft.DataColumn(ft.Text("N° Facture")),
+                ft.DataColumn(ft.Text("Client")),
+                ft.DataColumn(ft.Text("Niveau")),
+                ft.DataColumn(ft.Text("Montant")),
+                ft.DataColumn(ft.Text("Date d'Acquittement")),
+                ft.DataColumn(ft.Text("Contenu")),
+            ],
+            rows=rows,
+            heading_row_color=THEME["sage_pale"],
+            border=ft.border.all(1, THEME["sage_light"]),
+            border_radius=8,
+        )
+
+        return ft.Column([
+            ft.Row([
+                ft.Column([
+                    ft.Text("TOTAL RELANCES EXPÉDIÉES", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD),
+                    ft.Text(f"{total_relances} envoi(s)", size=20, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
+                ]),
+                ft.Column([
+                    ft.Text("MONTANT RÉGULARISÉ APRÈS RELANCE", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD),
+                    ft.Text(f"{total_recouvre:.2f} € Encaissés", size=20, weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800),
+                ]),
+            ], spacing=30),
+            ft.Divider(height=16, color=THEME["sage_light"]),
+            table_journal if rows else ft.Text("Aucune relance n'a encore été expédiée via Make.", italic=True),
+        ], spacing=14)
+
     def set_mode(mode):
         nonlocal current_mode
         current_mode = mode
@@ -2535,19 +2910,22 @@ def view_factures(page: ft.Page):
             if has_eligibles: update_create_form()
         elif mode == "edit":
             form_dynamic_container.content = form_edit_view
-        else:
+        elif mode == "avoir":
             form_dynamic_container.content = form_avoir_view
+        else: # journal
+            form_dynamic_container.content = build_journal_relances_view()
         page.update()
 
     btn_mode_create = ft.ElevatedButton("1. Établir une Facture", icon=ft.icons.ADD_CARD_ROUNDED, on_click=lambda e: set_mode("create"))
     btn_mode_edit = ft.ElevatedButton("2. Modifier / Corriger", icon=ft.icons.EDIT_NOTE_ROUNDED, on_click=lambda e: set_mode("edit"))
     btn_mode_avoir = ft.ElevatedButton("3. Émettre un Avoir", icon=ft.icons.REMOVE_CIRCLE_OUTLINE_ROUNDED, on_click=lambda e: set_mode("avoir"))
+    btn_mode_journal = ft.ElevatedButton("4. 📜 Journal des Relances", icon=ft.icons.HISTORY_ROUNDED, bgcolor=THEME["sage_dark"], color=ft.colors.WHITE, on_click=lambda e: set_mode("journal"))
     set_mode("create")
 
     return ft.ListView(
         controls=[
-            create_header("🧾", "Facturation & Avoirs", "Émission verrouillée, abonnements et nomenclature explicite"),
-            ft.Row([btn_mode_create, btn_mode_edit, btn_mode_avoir], spacing=12),
+            create_header("🧾", "Facturation, Avoirs & Recouvrement", "Émission verrouillée, abonnements, avoirs et journal d'audit des relances"),
+            ft.Row([btn_mode_create, btn_mode_edit, btn_mode_avoir, btn_mode_journal], spacing=12),
             ft.Container(height=14),
             create_card(form_dynamic_container, padding=24),
             build_footer(),
@@ -2557,7 +2935,7 @@ def view_factures(page: ft.Page):
     )
 
 
-# --- 9. APERÇU FACTURES & TAMPONS VIRTUELS ---
+# --- 9. APERÇU FACTURES & TAMPONS VIRTUELS AVEC COORDONNÉES BANCAIRES ---
 def view_facture_interactive(page: ft.Page):
     conn = get_db()
     items = pd.read_sql_query("SELECT numero_facture FROM factures ORDER BY id DESC", conn)
@@ -2586,6 +2964,11 @@ def view_facture_interactive(page: ft.Page):
                 border=ft.border.all(3, ft.colors.RED_700), border_radius=8, padding=ft.padding.symmetric(horizontal=18, vertical=6), rotate=ft.transform.Rotate(-0.2)
             )
 
+        is_tva = (ent.get("assujetti_tva") == 1)
+        taux_tva = float(ent.get("taux_tva_defaut") or 8.5)
+        montant_tva = (montant * (taux_tva / 100.0)) if is_tva else 0.0
+        net_ttc = montant + montant_tva
+
         paper_content = ft.Container(
             bgcolor=ft.colors.WHITE, border=ft.border.all(1, "#CBD5E0"), border_radius=12, padding=32,
             content=ft.Column(controls=[
@@ -2605,7 +2988,23 @@ def view_facture_interactive(page: ft.Page):
                     heading_row_color="#E7EEE6", border=ft.border.all(1, "#CBD5E0")
                 ),
                 ft.Container(height=18),
-                ft.Row(controls=[ft.Container(expand=True), ft.Column([ft.Text(f"Total H.T. : {montant:.2f} €", size=14), ft.Text(f"NET À PAYER : {montant:.2f} €", size=19, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]), ft.Text("TVA non applicable, art. 293 B du CGI.", size=10, italic=True)], horizontal_alignment=ft.CrossAxisAlignment.END)]),
+                ft.Row(controls=[
+                    ft.Container(expand=True),
+                    ft.Column([
+                        ft.Text(f"Total H.T. : {montant:.2f} €", size=13),
+                        ft.Text(f"TVA ({taux_tva:.1f}%) : {montant_tva:.2f} €" if is_tva else "Franchise de TVA (Art. 293 B CGI)", size=12, italic=True),
+                        ft.Text(f"NET À PAYER : {net_ttc:.2f} €", size=19, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
+                    ], horizontal_alignment=ft.CrossAxisAlignment.END)
+                ]),
+                ft.Container(height=14),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("🏦 COORDONNÉES BANCAIRES POUR VIREMENT", size=11, weight=ft.FontWeight.BOLD, color="#1A365D"),
+                        ft.Text(f"Banque : {ent['banque_nom'] or 'Non renseignée'} | Titulaire : {ent['titulaire_compte'] or ent['nom']}", size=11),
+                        ft.Text(f"IBAN : {ent['iban'] or 'Non renseigné'} | BIC : {ent['bic'] or 'Non renseigné'}", size=11, weight=ft.FontWeight.BOLD, color="#2B6CB0"),
+                    ], spacing=2),
+                    bgcolor="#F8FAFC", border=ft.border.all(1, "#CBD5E0"), border_radius=6, padding=10,
+                ),
             ])
         )
 
@@ -2644,6 +3043,7 @@ def view_facture_interactive(page: ft.Page):
         cursor.execute("UPDATE factures SET statut = ? WHERE numero_facture = ?", (dd_statut.value, dd_select.value))
 
         if dd_statut.value == "Facture Acquittée":
+            # 1. Si elle passe en Acquittée, on enregistre l'encaissement si absent
             cursor.execute("SELECT * FROM paiements WHERE numero_facture = ?", (dd_select.value,))
             if not cursor.fetchone():
                 cursor.execute(
@@ -2658,30 +3058,62 @@ def view_facture_interactive(page: ft.Page):
                 fd = cursor.fetchone()
                 if fd:
                     c_name = fd[1] or f"{fd[3]} {fd[2]}"
-                    cursor.execute("INSERT INTO paiements (numero_facture, date_paiement, client_nom, nature_prestation, montant_recu, mode_paiement, reference_reglement) VALUES (?, ?, ?, ?, ?, 'Virement bancaire', 'Règlement client direct')", (dd_select.value, str(datetime.date.today()), c_name, fd[4], float(fd[0])))
+                    cursor.execute(
+                        "INSERT INTO paiements (numero_facture, date_paiement, client_nom, nature_prestation, montant_recu, mode_paiement, reference_reglement) VALUES (?, ?, ?, ?, ?, 'Virement bancaire', 'Règlement client direct')",
+                        (dd_select.value, str(datetime.date.today()), c_name, fd[4], float(fd[0]))
+                    )
+        else:
+            # 2. SYNCHRONISATION INVERSE : Si elle repasse en "Facture Émise" ou "Annulée",
+            # on retire immédiatement la ligne du Livre des Recettes !
+            cursor.execute("DELETE FROM paiements WHERE numero_facture = ?", (dd_select.value,))
 
         conn.commit()
         conn.close()
-        show_toast(page, f"Statut mis à jour : {dd_statut.value}. Synchronisé au livre des recettes.")
+        show_toast(page, f"Statut mis à jour : {dd_statut.value}. Livre des recettes synchronisé !")
         load_invoice(None)
+
+    def export_facturx(e):
+        if not dd_select.value:
+            show_toast(page, "Sélectionnez une facture d'abord.", is_error=True)
+            return
+
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT f.*, d.client_nom, d.client_prenom, d.client_societe, d.client_adresse
+            FROM factures f
+            JOIN devis d ON f.numero_devis = d.numero_devis
+            WHERE f.numero_facture = ?
+            """,
+            (dd_select.value,),
+        )
+        f_row = cursor.fetchone()
+        conn.close()
+
+        xml_str = generate_facturx_xml(f_row, ent)
+        exports_dir = os.path.join(BASE_DIR, "exports_comptables")
+        os.makedirs(exports_dir, exist_ok=True)
+        xml_path = os.path.join(exports_dir, f"FACTURX_{f_row['numero_facture']}.xml")
+
+        with open(xml_path, "w", encoding="utf-8") as xf:
+            xf.write(xml_str)
+
+        show_toast(page, f"Fichier Factur-X (CII) généré avec succès !")
+        webbrowser.open(f"file://{exports_dir}")
 
     return ft.ListView(
         controls=[
-            create_header("🖨️", "Aperçu & Gestion des Factures", "Consultation, mise à jour du statut et réimpression avec tampons virtuels"),
+            create_header("🖨️", "Aperçu, Factur-X & Gestion", "Consultation, réimpression, tampons virtuels et export XML Factur-X 2026"),
             create_card(
                 ft.Row(
                     controls=[
                         dd_select,
                         dd_statut,
                         ft.ElevatedButton("Valider Statut", icon=ft.icons.CHECK_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=update_invoice_status),
-                        ft.ElevatedButton(
-                            "🖨️ Imprimer la Facture (PDF)",
-                            icon=ft.icons.PRINT_ROUNDED,
-                            bgcolor=THEME["sage_dark"],
-                            color=ft.colors.WHITE,
-                            height=48,
-                            on_click=lambda e: execute_print_facture(dd_select.value, page) if dd_select.value else show_toast(page, "Sélectionnez une facture d'abord.", is_error=True)
-                        ),
+                        ft.ElevatedButton("🖨️ Imprimer Facture (PDF)", icon=ft.icons.PRINT_ROUNDED, bgcolor=THEME["sage_dark"], color=ft.colors.WHITE, height=45, on_click=lambda e: execute_print_facture(dd_select.value, page) if dd_select.value else show_toast(page, "Sélectionnez une facture.", is_error=True)),
+                        ft.ElevatedButton("⚡ Export Factur-X (XML)", icon=ft.icons.INTEGRATION_INSTRUCTIONS_ROUNDED, bgcolor=ft.colors.BLUE_800, color=ft.colors.WHITE, height=45, on_click=export_facturx),
                     ],
                     alignment=ft.MainAxisAlignment.START,
                 )
@@ -2695,7 +3127,7 @@ def view_facture_interactive(page: ft.Page):
     )
 
 
-# --- 10. LIVRE DES RECETTES (URSSAF) ---
+# --- 10. LIVRE DES RECETTES (URSSAF) AVEC EXPORT AUTONOME ---
 def view_livre_recettes(page: ft.Page):
     conn = get_db()
     df_p = pd.read_sql_query("SELECT * FROM paiements ORDER BY date_paiement DESC, id DESC", conn)
@@ -2704,6 +3136,47 @@ def view_livre_recettes(page: ft.Page):
 
     taux_urssaf, taux_ir = ent["taux_urssaf"], ent["taux_ir"]
     total_encaisse = df_p["montant_recu"].sum() if not df_p.empty else 0.0
+
+    # Fonction d'export locale et autonome (élimine tout NameError)
+    def export_recettes(fmt: str):
+        conn_exp = get_db()
+        today_str = datetime.date.today().strftime("%Y%m%d")
+        exports_dir = os.path.join(BASE_DIR, "exports_comptables")
+        os.makedirs(exports_dir, exist_ok=True)
+
+        df = pd.read_sql_query(
+            """
+            SELECT date_paiement AS 'Date Encaissement',
+                   numero_facture AS 'N° Facture',
+                   client_nom AS 'Client / Payeur',
+                   nature_prestation AS 'Nature de la Prestation',
+                   mode_paiement AS 'Mode de Règlement',
+                   reference_reglement AS 'Référence Transaction',
+                   montant_recu AS 'Montant Encaissé (€)'
+            FROM paiements 
+            ORDER BY date_paiement ASC, id ASC
+            """,
+            conn_exp,
+        )
+        conn_exp.close()
+
+        if df.empty:
+            show_toast(page, "Aucun encaissement à exporter pour le moment.", is_error=True)
+            return
+
+        nom_base = f"Livre_des_Recettes_Officiel_URSSAF_{today_str}"
+        try:
+            if fmt == "xlsx":
+                file_path = os.path.join(exports_dir, f"{nom_base}.xlsx")
+                df.to_excel(file_path, index=False)
+            else:
+                file_path = os.path.join(exports_dir, f"{nom_base}.csv")
+                df.to_csv(file_path, sep=";", index=False, encoding="utf-8-sig")
+
+            show_toast(page, f"Export réussi : {os.path.basename(file_path)}")
+            webbrowser.open(f"file://{exports_dir}")
+        except Exception as ex:
+            show_toast(page, f"Erreur lors de l'export : {str(ex)}", is_error=True)
 
     p_rows = [
         ft.DataRow(cells=[
@@ -2727,13 +3200,23 @@ def view_livre_recettes(page: ft.Page):
 
     return ft.ListView(
         controls=[
-            create_header("💰", "Livre des Recettes (URSSAF)", "Document légal obligatoire listant les encaissements"),
+            create_header("💰", "Livre des Recettes (URSSAF)", "Document légal obligatoire listant les encaissements réels"),
             create_card(
-                ft.Row([
-                    ft.Column([ft.Text("TOTAL ENCAISSÉ", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{total_encaisse:.2f} €", size=22, weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800)]),
-                    ft.Column([ft.Text(f"COTISATIONS URSSAF ({taux_urssaf}%)", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{(total_encaisse * taux_urssaf / 100):.2f} €", size=20, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"])]),
-                    ft.Column([ft.Text(f"IMPÔT REVENU IR ({taux_ir}%)", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{(total_encaisse * taux_ir / 100):.2f} €", size=20, weight=ft.FontWeight.BOLD, color=THEME["blush_dark"])]),
-                ], alignment=ft.MainAxisAlignment.SPACE_AROUND),
+                ft.Column([
+                    ft.Row([
+                        ft.Column([ft.Text("TOTAL ENCAISSÉ", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{total_encaisse:.2f} €", size=22, weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800)]),
+                        ft.Column([ft.Text(f"COTISATIONS URSSAF ({taux_urssaf}%)", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{(total_encaisse * taux_urssaf / 100):.2f} €", size=20, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"])]),
+                        ft.Column([ft.Text(f"IMPÔT REVENU IR ({taux_ir}%)", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{(total_encaisse * taux_ir / 100):.2f} €", size=20, weight=ft.FontWeight.BOLD, color=THEME["blush_dark"])]),
+                    ], alignment=ft.MainAxisAlignment.SPACE_AROUND),
+                    ft.Divider(height=16, color=THEME["sage_light"]),
+                    ft.Row([
+                        ft.Text("Exports légaux conformes URSSAF / Contrôle fiscal :", size=12, weight=ft.FontWeight.BOLD),
+                        ft.Row([
+                            ft.ElevatedButton("📊 Exporter en Excel (.xlsx)", icon=ft.icons.TABLE_VIEW_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=lambda e: export_recettes("xlsx")),
+                            ft.ElevatedButton("📄 Exporter en CSV (.csv)", icon=ft.icons.FILE_DOWNLOAD_ROUNDED, bgcolor=THEME["sage_dark"], color=ft.colors.WHITE, on_click=lambda e: export_recettes("csv")),
+                        ], spacing=10),
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ], spacing=12),
                 padding=20,
             ),
             ft.Container(height=18),
@@ -2745,11 +3228,54 @@ def view_livre_recettes(page: ft.Page):
     )
 
 
-# --- 11. DÉPENSES & ACHATS ---
+# --- 11. DÉPENSES & ACHATS AVEC EXPORT AUTONOME ---
 def view_depenses(page: ft.Page):
     conn = get_db()
     df_dep = pd.read_sql_query("SELECT * FROM depenses ORDER BY date_depense DESC, id DESC", conn)
     conn.close()
+
+    total_dep = df_dep["montant"].sum() if not df_dep.empty else 0.0
+
+    # Fonction d'export locale et autonome des dépenses
+    def export_depenses(fmt: str):
+        conn_exp = get_db()
+        today_str = datetime.date.today().strftime("%Y%m%d")
+        exports_dir = os.path.join(BASE_DIR, "exports_comptables")
+        os.makedirs(exports_dir, exist_ok=True)
+
+        df = pd.read_sql_query(
+            """
+            SELECT date_depense AS 'Date Dépense',
+                   fournisseur AS 'Fournisseur',
+                   categorie AS 'Catégorie de Charge',
+                   montant AS 'Montant Payé TTC (€)',
+                   mode_paiement AS 'Mode de Paiement',
+                   justificatif_ref AS 'Réf Justificatif',
+                   notes AS 'Notes'
+            FROM depenses 
+            ORDER BY date_depense ASC, id ASC
+            """,
+            conn_exp,
+        )
+        conn_exp.close()
+
+        if df.empty:
+            show_toast(page, "Aucune dépense à exporter.", is_error=True)
+            return
+
+        nom_base = f"Registre_des_Achats_et_Depenses_{today_str}"
+        try:
+            if fmt == "xlsx":
+                file_path = os.path.join(exports_dir, f"{nom_base}.xlsx")
+                df.to_excel(file_path, index=False)
+            else:
+                file_path = os.path.join(exports_dir, f"{nom_base}.csv")
+                df.to_csv(file_path, sep=";", index=False, encoding="utf-8-sig")
+
+            show_toast(page, f"Export réussi : {os.path.basename(file_path)}")
+            webbrowser.open(f"file://{exports_dir}")
+        except Exception as ex:
+            show_toast(page, f"Erreur export : {str(ex)}", is_error=True)
 
     txt_fournisseur = ft.TextField(label="Fournisseur *", expand=True)
     txt_date_d = ft.TextField(label="Date (AAAA-MM-JJ)", value=str(datetime.date.today()), width=200)
@@ -2785,14 +3311,28 @@ def view_depenses(page: ft.Page):
 
     return ft.ListView(
         controls=[
-            create_header("📉", "Dépenses & Achats", "Frais d'exploitation, abonnements et matériel"),
+            create_header("📉", "Dépenses & Achats", "Frais d'exploitation, abonnements et registre comptable des charges"),
             create_card(
                 ft.Column(controls=[
                     ft.Text("➕ Ajouter une dépense d'exploitation", size=15, weight=ft.FontWeight.BOLD),
                     ft.Row([txt_date_d, txt_fournisseur, dd_cat, txt_montant_d, ft.ElevatedButton("Ajouter", bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=add_depense)]),
                 ], spacing=14)
             ),
-            ft.Container(height=18),
+            ft.Container(height=14),
+            create_card(
+                ft.Row([
+                    ft.Column([
+                        ft.Text("TOTAL DES DÉPENSES ENGAGÉES", size=11, color=THEME["text_muted"], weight=ft.FontWeight.BOLD),
+                        ft.Text(f"{total_dep:.2f} € TTC", size=20, weight=ft.FontWeight.BOLD, color=THEME["blush_dark"]),
+                    ]),
+                    ft.Row([
+                        ft.ElevatedButton("📊 Exporter Dépenses (.xlsx)", icon=ft.icons.TABLE_VIEW_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=lambda e: export_depenses("xlsx")),
+                        ft.ElevatedButton("📄 Exporter Dépenses (.csv)", icon=ft.icons.FILE_DOWNLOAD_ROUNDED, bgcolor=THEME["sage_dark"], color=ft.colors.WHITE, on_click=lambda e: export_depenses("csv")),
+                    ], spacing=10),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                padding=18,
+            ),
+            ft.Container(height=14),
             create_card(table_depenses if dep_rows else ft.Text("Aucune dépense enregistrée.", italic=True), padding=16),
             build_footer(),
         ],
@@ -3003,7 +3543,7 @@ def view_dossier_contractuel(page: ft.Page):
     )
 
 
-# --- 13. PARAMÈTRES ENTREPRISE ---
+# --- 13. PARAMÈTRES ENTREPRISE (AVEC COORDONNÉES BANCAIRES ÉTAPE 1) ---
 def view_settings(page: ft.Page):
     ent = get_entreprise_info()
     txt_nom = ft.TextField(label="Nom commercial / Raison sociale", value=ent["nom"])
@@ -3015,35 +3555,174 @@ def view_settings(page: ft.Page):
     txt_taux_urssaf = ft.TextField(label="Taux Cotisations URSSAF (%)", value=f"{ent['taux_urssaf']:.1f}", width=220)
     txt_taux_ir = ft.TextField(label="Taux Provision Impôt sur le Revenu (%)", value=f"{ent['taux_ir']:.1f}", width=220)
 
+    txt_banque = ft.TextField(label="Nom de l'Établissement Bancaire", value=ent["banque_nom"], width=320)
+    txt_titulaire = ft.TextField(label="Titulaire du compte bancaire", value=ent["titulaire_compte"] or ent["nom"], expand=True)
+    txt_iban = ft.TextField(label="IBAN (ex: FR76 1234 5678 ...)", value=ent["iban"], expand=True)
+    txt_bic = ft.TextField(label="Code BIC / SWIFT", value=ent["bic"], width=240)
+
+    txt_webhook_make = ft.TextField(
+        label="URL du Webhook Make (Integromat) pour les Relances d'Impayés",
+        value=ent.get("webhook_make_relance", ""),
+        hint_text="https://hook.eu1.make.com/xxxxxxxxxxxxxxxxxxxxxxxx",
+        expand=True,
+    )
+
+    chk_assujetti_tva = ft.Checkbox(
+        label="Entreprise Assujettie à la TVA (Dépassement du seuil de 36 800 € ou option volontaire)",
+        value=(ent.get("assujetti_tva") == 1),
+    )
+
+    dd_taux_tva = ft.Dropdown(
+        label="Taux de TVA standard applicable :",
+        options=[
+            ft.dropdown.Option("8.5", "8,5 % (DOM - Guadeloupe, Martinique, Réunion)"),
+            ft.dropdown.Option("20.0", "20,0 % (France Métropolitaine)"),
+            ft.dropdown.Option("2.1", "2,1 % (Taux particulier DOM)"),
+            ft.dropdown.Option("10.0", "10,0 % (Taux intermédiaire Métropole)"),
+        ],
+        value=f"{ent.get('taux_tva_defaut'):.1f}" if f"{ent.get('taux_tva_defaut'):.1f}" in ["8.5", "20.0", "2.1", "10.0"] else "8.5",
+        width=380,
+    )
+
+    txt_tva_intercom = ft.TextField(
+        label="Numéro de TVA Intracommunautaire",
+        value=ent.get("numero_tva_intercom", ""),
+        hint_text="FR 12 345678901",
+        width=300,
+    )
+
+    def on_tva_toggle(e):
+        dd_taux_tva.disabled = not chk_assujetti_tva.value
+        txt_tva_intercom.disabled = not chk_assujetti_tva.value
+        page.update()
+
+    chk_assujetti_tva.on_change = on_tva_toggle
+    dd_taux_tva.disabled = not chk_assujetti_tva.value
+    txt_tva_intercom.disabled = not chk_assujetti_tva.value
+
     def save_settings(e):
         try:
             t_u = float(txt_taux_urssaf.value.replace(",", "."))
             t_i = float(txt_taux_ir.value.replace(",", "."))
+            t_tva = float(dd_taux_tva.value.replace(",", ".")) if dd_taux_tva.value else 8.5
         except ValueError:
             show_toast(page, "Les taux doivent être des valeurs numériques.", is_error=True)
             return
 
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute("UPDATE entreprise SET nom=?, adresse=?, siret=?, rcs_rm=?, forme_juridique=?, taux_urssaf=?, taux_ir=? WHERE id=1", (txt_nom.value.strip(), txt_adresse.value.strip(), txt_siret.value.strip(), txt_rcs.value.strip(), txt_forme.value.strip(), t_u, t_i))
+        cursor.execute(
+            """
+            UPDATE entreprise SET 
+                nom=?, adresse=?, siret=?, rcs_rm=?, forme_juridique=?, taux_urssaf=?, taux_ir=?,
+                iban=?, bic=?, banque_nom=?, titulaire_compte=?, webhook_make_relance=?,
+                assujetti_tva=?, taux_tva_defaut=?, numero_tva_intercom=?
+            WHERE id=1
+            """,
+            (
+                txt_nom.value.strip(), txt_adresse.value.strip(), txt_siret.value.strip(),
+                txt_rcs.value.strip(), txt_forme.value.strip(), t_u, t_i,
+                txt_iban.value.strip().replace(" ", "").upper(), txt_bic.value.strip().upper(),
+                txt_banque.value.strip(), txt_titulaire.value.strip(), txt_webhook_make.value.strip(),
+                1 if chk_assujetti_tva.value else 0, t_tva, txt_tva_intercom.value.strip().upper()
+            )
+        )
         conn.commit()
         conn.close()
-        show_toast(page, "Paramètres et taux fiscaux actualisés !")
+        show_toast(page, "Paramètres d'entreprise, coordonnées bancaires et régime TVA enregistrés !")
         page.go("/dashboard")
+
+    def print_attestation_art286(e):
+        """Imprime l'attestation légale officielle de conformité éditeur."""
+        html = generate_attestation_conformite_html(ent)
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html", encoding="utf-8") as tf:
+            tf.write(html)
+            temp_path = tf.name
+
+        webbrowser.open(f"file://{temp_path}")
+        show_toast(page, "Attestation de Conformité Art. 286 du CGI ouverte pour impression.")
+
+    def do_system_backup(e):
+        today_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        backups_dir = os.path.join(BASE_DIR, "backups_systeme")
+        os.makedirs(backups_dir, exist_ok=True)
+        zip_name = f"themis_backup_{today_str}.zip"
+        zip_path = os.path.join(backups_dir, zip_name)
+
+        try:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+                if os.path.exists(DB_PATH):
+                    zipf.write(DB_PATH, arcname="devis_suivi.db")
+                if os.path.exists(SCANS_DIR):
+                    for root, _, files in os.walk(SCANS_DIR):
+                        for file in files:
+                            abs_file = os.path.join(root, file)
+                            rel_file = os.path.relpath(abs_file, BASE_DIR)
+                            zipf.write(abs_file, arcname=rel_file)
+
+            show_toast(page, f"Sauvegarde complète réussie : {zip_name}")
+            webbrowser.open(f"file://{backups_dir}")
+        except Exception as ex:
+            show_toast(page, f"Erreur de sauvegarde : {str(ex)}", is_error=True)
 
     return ft.ListView(
         controls=[
-            create_header("⚙️", "Paramètres de l'Entreprise", "Mentions légales obligatoires et taux de cotisations"),
+            create_header("⚙️", "Paramètres, Fiscalité & Conformité", "Informations légales, fiscalité, banque, TVA, Make et certificat éditeur"),
             create_card(
                 ft.Column(controls=[
                     ft.Text("1. Informations Légales", weight=ft.FontWeight.BOLD, size=15),
                     txt_nom, txt_adresse, txt_forme, txt_siret, txt_rcs,
                     ft.Divider(height=18),
-                    ft.Text("2. Taux Fiscaux & Sociaux Micro-Entreprise", weight=ft.FontWeight.BOLD, size=15),
+                    ft.Text("2. Coordonnées Bancaires (Affichées sur Factures & Devis)", weight=ft.FontWeight.BOLD, size=15, color=THEME["sage_dark"]),
+                    ft.Row([txt_banque, txt_titulaire]),
+                    ft.Row([txt_iban, txt_bic]),
+                    ft.Divider(height=18),
+                    ft.Text("3. Régime de TVA & Fiscalité (Franchise vs Assujetti)", weight=ft.FontWeight.BOLD, size=15, color=ft.colors.BLUE_800),
+                    chk_assujetti_tva,
+                    ft.Row([dd_taux_tva, txt_tva_intercom]),
+                    ft.Text("💡 En Guadeloupe, le taux de TVA standard est de 8,5 % (20 % en Métropole). Lorsque la case est décochée, Themis applique la Franchise en base (Art. 293 B du CGI).", size=11, color=THEME["text_muted"], italic=True),
+                    ft.Divider(height=18),
+                    ft.Text("4. Intégration Make (Relance Automatisée des Impayés)", weight=ft.FontWeight.BOLD, size=15, color=ft.colors.PURPLE_800),
+                    txt_webhook_make,
+                    ft.Divider(height=18),
+                    ft.Text("5. Taux Sociaux & Impôt Micro-Entreprise", weight=ft.FontWeight.BOLD, size=15),
                     ft.Row([txt_taux_urssaf, txt_taux_ir]),
-                    ft.Text("💡 Taux standard BNC/Services : URSSAF 21,2 % et Versement Libératoire IR 2,2 %.", size=11, color=THEME["text_muted"], italic=True),
-                    ft.ElevatedButton("Enregistrer les paramètres", icon=ft.icons.SAVE_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=save_settings),
+                    ft.ElevatedButton("Enregistrer l'ensemble des paramètres", icon=ft.icons.SAVE_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, height=48, on_click=save_settings),
                 ], spacing=14)
+            ),
+            ft.Container(height=18),
+            create_card(
+                ft.Row([
+                    ft.Column([
+                        ft.Text("📜 Conformité Éditeur — Article 286 du CGI", size=15, weight=ft.FontWeight.BOLD, color="#1A365D"),
+                        ft.Text("Générez l'attestation formelle d'inaltérabilité, sécurisation, conservation et archivage exigée par l'administration fiscale.", size=12, color=THEME["text_muted"]),
+                    ], expand=True),
+                    ft.ElevatedButton("🖨️ Éditer l'Attestation Fiscale (PDF)", icon=ft.icons.GAVEL_ROUNDED, bgcolor="#1A365D", color=ft.colors.WHITE, height=45, on_click=print_attestation_art286),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                padding=20,
+            ),
+            ft.Container(height=18),
+            create_card(
+                ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.icons.SECURITY_ROUNDED, color=THEME["sage_dark"], size=22),
+                        ft.Text("6. Sauvegarde Globale & Protection des Données (Archive ZIP)", weight=ft.FontWeight.BOLD, size=15, color=THEME["sage_dark"]),
+                    ], spacing=8),
+                    ft.Text(
+                        "Générez une archive ZIP autonome et horodatée contenant la totalité de votre base de données comptable (devis_suivi.db) et l'intégralité de vos scans de contrats clients.",
+                        size=12,
+                        color=THEME["text_muted"],
+                    ),
+                    ft.ElevatedButton(
+                        "💾 Créer une Sauvegarde Complète en 1 Clic (ZIP)",
+                        icon=ft.icons.ARCHIVE_ROUNDED,
+                        bgcolor=ft.colors.GREEN_800,
+                        color=ft.colors.WHITE,
+                        height=46,
+                        on_click=do_system_backup,
+                    ),
+                ], spacing=12),
+                padding=20,
             ),
             build_footer(),
         ],
@@ -3202,5 +3881,4 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8501))
-    ft.app(target=main, host="0.0.0.0", port=port, view=ft.AppView.WEB_BROWSER)
+    ft.app(target=main, view=ft.AppView.WEB_BROWSER)
