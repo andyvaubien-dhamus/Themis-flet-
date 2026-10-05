@@ -31,7 +31,7 @@ def text_to_html_list(text):
 
 
 # ===========================================================================
-# 1. DOSSIER CONTRACTUEL COMPLET (7 PAGES) + LOGO OFFICIEL THEMIS
+# 1. DOSSIER CONTRACTUEL COMPLET (7 PAGES) AVEC COORDONNÉES BANCAIRES
 # ===========================================================================
 def generate_dossier_contractuel_html(d, ent):
     """Génère l'intégralité du dossier contractuel (7 pages A4 complètes, non abrégées)."""
@@ -44,6 +44,11 @@ def generate_dossier_contractuel_html(d, ent):
     solde_val = setup - acompte_val
     abo_val = float(d_dict["montant_abo"])
     logo_html = get_logo_html()
+
+    iban_str = ent_dict.get("iban") or "Non renseigné"
+    bic_str = ent_dict.get("bic") or "Non renseigné"
+    banque_str = ent_dict.get("banque_nom") or "Établissement Bancaire"
+    titulaire_str = ent_dict.get("titulaire_compte") or ent_dict.get("nom")
 
     # Lecture des lignes multi-prestations
     try:
@@ -101,6 +106,15 @@ def generate_dossier_contractuel_html(d, ent):
 
     client_display = d_dict.get("client_societe") or f"{d_dict.get('client_prenom', '')} {d_dict.get('client_nom', '')}"
 
+    rib_box_html = f"""
+    <div style="margin-top: 15px; padding: 10px 14px; background: #F8FAFC; border: 1px solid #CBD5E0; border-radius: 6px; font-size: 11px;">
+        <strong style="color: #1A365D;">COORDONNÉES BANCAIRES POUR LE RÈGLEMENT (VIREMENT) :</strong><br>
+        Banque : <strong>{banque_str}</strong> | Titulaire : <strong>{titulaire_str}</strong><br>
+        IBAN : <code style="font-size: 11.5px; font-weight: bold; color: #2B6CB0;">{iban_str}</code> | 
+        BIC : <code style="font-size: 11.5px; font-weight: bold; color: #2B6CB0;">{bic_str}</code>
+    </div>
+    """
+
     return f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -120,7 +134,7 @@ def generate_dossier_contractuel_html(d, ent):
         table {{ width: 100%; border-collapse: collapse; margin: 15px 0; }}
         th, td {{ border: 1px solid #CBD5E0; padding: 8px; text-align: left; font-size: 12px; }}
         th {{ background-color: #EDF2F7; color: #1A365D; }}
-        .signatures-container {{ margin-top: 30px; width: 100%; }}
+        .signatures-container {{ margin-top: 25px; width: 100%; }}
         .sig-box-left {{ width: 45%; height: 70px; border: 1px dashed #A0AEC0; padding: 8px; font-size: 11px; color: #718096; display: inline-block; box-sizing: border-box; }}
         .sig-box-right {{ width: 45%; height: 70px; border: 1px dashed #A0AEC0; padding: 8px; font-size: 11px; color: #718096; display: inline-block; float: right; box-sizing: border-box; }}
         .clear {{ clear: both; }}
@@ -137,7 +151,7 @@ def generate_dossier_contractuel_html(d, ent):
                 {logo_html}
                 <h2 style="margin: 0; color: #1a365d;">{ent_dict['nom']}</h2>
                 <p style="margin: 5px 0 0 0;">{ent_dict['adresse']}</p>
-                <p style="margin: 2px 0;">Solutions logicielles sur-mesure</p>
+                <p style="margin: 2px 0;">Solutions logicielles & automatisation</p>
                 <p style="font-size: 10px; color: #666; margin: 4px 0 0 0;">{ent_dict['forme_juridique']}<br>SIRET : {ent_dict['siret']}<br>{ent_dict['rcs_rm']}</p>
             </td>
             <td style="border: none; text-align: right; vertical-align: top;">
@@ -156,11 +170,12 @@ def generate_dossier_contractuel_html(d, ent):
             {table_lignes_html}
         </table>
         {roi_html}
-        <div style="text-align: right; margin-top: 15px;">
+        <div style="text-align: right; margin-top: 10px;">
             <p style="font-size: 13px; margin: 2px 0;">Total Frais de Création : <strong>{setup:.2f} € H.T.</strong></p>
             <p style="font-size: 13px; margin: 2px 0;">Total Abonnements récurrents : <strong>{abo_val:.2f} € H.T. / mois</strong></p>
             <p style="font-size: 10px; color: #666; margin-top: 4px;"><em>TVA non applicable, art. 293 B du CGI.</em></p>
         </div>
+        {rib_box_html}
         <div class="signatures-container"><p><strong>Bon pour accord et engagement :</strong></p><div class="sig-box-left">Signature du Prestataire :</div><div class="sig-box-right">Signature & Cachet du Client :</div><div class="clear"></div></div>
     </div>
 
@@ -189,6 +204,7 @@ def generate_dossier_contractuel_html(d, ent):
         <p>Le Client confirme la commande ferme et définitive de la prestation décrite au devis n° {d_dict['numero_devis']} pour un montant de <strong>{setup:.2f} € H.T.</strong> au titre du forfait Setup & Création Initiale, et un abonnement mensuel de <strong>{abo_val:.2f} € H.T.</strong></p>
         <table><tr><th>Élément</th><th style="text-align: right; width: 140px;">Montant H.T.</th></tr><tr><td>Total Forfaits Setup & Création</td><td style="text-align: right;">{setup:.2f} €</td></tr><tr><td>Acompte à la commande ({pct}%)</td><td style="text-align: right;">{acompte_val:.2f} €</td></tr><tr><td>Solde à la livraison</td><td style="text-align: right;">{solde_val:.2f} €</td></tr><tr><td>Abonnement mensuel</td><td style="text-align: right;">{abo_val:.2f} €</td></tr></table>
         <p>La signature vaut acceptation sans réserve des CGV et engage le Client au versement de l'acompte prévu.</p>
+        {rib_box_html}
         <div class="signatures-container"><p><strong>Bon pour commande, le _____________________</strong></p><div class="sig-box-left">Pour le Prestataire<br>Signature :</div><div class="sig-box-right">Pour le Client<br>Signature & Cachet :</div><div class="clear"></div></div>
     </div>
 
@@ -605,7 +621,8 @@ def generate_blueprint_html(bp_row, client_nom, ent):
         </p>
         <p style="font-size: 10px; color: #777; margin-top: 40px; border-top: 1px solid #CBD5E0; padding-top: 10px;">Livrable d'ingénierie remis au Client avec le Procès-Verbal de Recette — Droits d'exploitation concédés selon Art. 8 des CGV.</p>
     </div></body></html>"""
-    
+
+
 # ===========================================================================
 # 6. LIVRET D'ACCUEIL & GUIDE D'EXPLOITATION OFFICIEL THEMIS ERP (A4 / PDF)
 # ===========================================================================
@@ -613,7 +630,6 @@ def generate_livret_accueil_html(ent):
     """Génère le livret d'accueil imprimable reprenant toutes les fonctions de Themis."""
     ent_d = dict(ent) if hasattr(ent, "keys") else ent
     logo_html = get_logo_html()
-    now = datetime.date.today()
 
     return f"""<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Livret_Accueil_Themis_ERP</title>
     <style>
@@ -623,9 +639,8 @@ def generate_livret_accueil_html(ent):
         h2 {{ font-size: 15px; color: #2B6CB0; margin-top: 18px; border-bottom: 1px solid #E2E8F0; padding-bottom: 4px; }}
         h3 {{ font-size: 13px; color: #22543D; margin-top: 12px; }}
         p, li {{ font-size: 11.5px; text-align: justify; }}
-        .badge {{ background: #E7EEE6; color: #276749; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 10px; }}
         .box {{ background: #F8FAFC; border: 1px solid #CBD5E0; border-radius: 6px; padding: 12px; margin: 12px 0; }}
-        @media print {{ body {{ background: transparent; padding: 0; }} .page {{ box-shadow: none; width: 100%; border: none; margin: 0; }} .no-print {{ display: none; }} }}
+        @media print {{ body {{ background: transparent; padding: 0; }} .page {{ box-shadow: none; width: 100%; border: none; }} .no-print {{ display: none; }} }}
     </style></head><body>
     <div class="no-print" style="text-align: center; margin-bottom: 20px;">
         <button onclick="window.print()" style="padding: 10px 25px; background: #6E8A85; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">🖨️ Imprimer ou Enregistrer le Livret en PDF</button>
@@ -660,17 +675,18 @@ def generate_livret_accueil_html(ent):
     <div class="page">
         <h2>4. Cycle Commercial, Devis & CRM</h2>
         <div class="box">
+            • <strong>Portefeuille Client 360° :</strong> Vue intégrale des travaux livrés, abonnements et factures.<br>
             • <strong>Annuaire CRM & Coffre-Fort de Secrets :</strong> Stockage chiffré des clés API clients et édition en 1 clic de l'Attestation de Révocation / Décharge RGPD.<br>
             • <strong>Catalogue 8 Forfaits :</strong> Tarification pré-enregistrée réinjectable en 1 clic.<br>
             • <strong>Calculateur de ROI Client :</strong> Démonstration chiffrée des économies annuelles et du délai d'amortissement imprimée sur le devis.
         </div>
 
-        <h2>5. Sécurité Contractuelle & Facturation</h2>
+        <h2>5. Sécurité Contractuelle, Coordonnées Bancaires & Facturation</h2>
         <p>Themis applique un protocole d'engagement inviolable :</p>
         <ul>
-            <li><strong>Dossier Contractuel 7 Pages :</strong> Devis, Bon de commande, CGV complètes (14 articles), PV de recette (3 réserves), Contrat SLA (9 articles), NDA (6 articles).</li>
+            <li><strong>Dossier Contractuel 7 Pages :</strong> Devis, Bon de commande avec IBAN/BIC, CGV complètes (14 articles), PV de recette (3 réserves), Contrat SLA (9 articles), NDA (6 articles).</li>
+            <li><strong>Coordonnées Bancaires Intégrées :</strong> Cartouche RIB officiel imprimé sur devis, bons de commande et factures.</li>
             <li><strong>Verrou d'Émission :</strong> Aucune facture ne peut être émise sans que le devis soit 'Validé & Signé' ET le contrat signé.</li>
-            <li><strong>Archivage Multi-Scans :</strong> Rattachement illimité des PDF de contrats signés par le client dans son dossier.</li>
             <li><strong>Tampons Virtuels & Livre des Recettes :</strong> Application des tampons 'PAYÉE' / 'ANNULÉE' et synchronisation automatique avec le Livre des Recettes URSSAF.</li>
         </ul>
 
@@ -678,4 +694,131 @@ def generate_livret_accueil_html(ent):
             © Dhamusoft — Tous droits réservés • Guide d'exploitation Themis ERP.
         </div>
     </div>
-    </body></html>"""    
+    </body></html>"""
+    
+# ===========================================================================
+# [FONCTIONS AJOUTÉES - ÉTAPE 5] : Attestation Art. 286 CGI & Factur-X XML
+# ===========================================================================
+
+def generate_attestation_conformite_html(ent):
+    """Génère l'Attestation formelle de conformité de l'éditeur au titre de l'Art. 286, I, 3° bis du CGI."""
+    ent_d = dict(ent) if hasattr(ent, "keys") else ent
+    logo_html = get_logo_html()
+    today_fr = datetime.date.today().strftime("%d/%m/%Y")
+
+    return f"""<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Attestation_Conformite_Art286_CGI</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif; padding: 30px; background: #FAF7F2; color: #2D3748; line-height: 1.6; }}
+        .page {{ width: 210mm; min-height: 270mm; margin: auto; background: white; padding: 25mm 20mm; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.08); box-sizing: border-box; }}
+        h1 {{ font-size: 18px; color: #1A365D; border-bottom: 2px solid #6E8A85; padding-bottom: 8px; text-transform: uppercase; text-align: center; }}
+        .legal-box {{ background: #F8FAFC; border: 1px solid #CBD5E0; border-radius: 6px; padding: 14px; margin: 18px 0; font-size: 11.5px; }}
+        .pillar {{ margin: 12px 0; font-size: 12px; }}
+        .sig-box {{ margin-top: 40px; float: right; width: 260px; border: 1px dashed #A0AEC0; padding: 12px; text-align: center; font-size: 11px; }}
+        @media print {{ body {{ background: transparent; padding: 0; }} .page {{ box-shadow: none; width: 100%; border: none; }} .no-print {{ display: none; }} }}
+    </style></head><body>
+    <div class="no-print" style="text-align: center; margin-bottom: 20px;">
+        <button onclick="window.print()" style="padding: 10px 25px; background: #6E8A85; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">🖨️ Imprimer ou Enregistrer en PDF</button>
+    </div>
+    <div class="page">
+        {logo_html}
+        <p style="font-size: 11px; color: #718096; margin: 0;">RÉPUBLIQUE FRANÇAISE — MINISTÈRE DE L'ÉCONOMIE ET DES FINANCES</p>
+        <p style="font-size: 11px; color: #718096; margin: 0;">Code Général des Impôts — Article 286, I, 3° bis</p>
+        <hr style="border: 0; border-top: 1px solid #CBD5E0; margin: 15px 0;">
+        
+        <h1>ATTESTATION INDIVIDUELLE DE CONFORMITÉ DE L'ÉDITEUR</h1>
+        <p style="text-align: center; font-size: 12px; font-weight: bold; color: #2B6CB0;">Système d'Enregistrement et d'Encaissement Themis ERP Suite (Version 3.0)</p>
+
+        <div class="legal-box">
+            <strong>Éditeur et Concepteur du Logiciel :</strong><br>
+            Raison sociale : <strong>{ent_d['nom']}</strong><br>
+            Siège social : {ent_d['adresse']}<br>
+            SIRET : {ent_d['siret']} | Forme juridique : {ent_d['forme_juridique']}
+        </div>
+
+        <p style="font-size: 12px; text-align: justify;">
+            Je soussigné, représentant légal de l'éditeur ci-dessus désigné, certifie sur l'honneur que le progiciel de facturation et de gestion commerciale <strong>Themis ERP Suite</strong> satisfait à l'ensemble des conditions d'<strong>inaltérabilité, de sécurisation, de conservation et d'archivage des données</strong> prévues par l'article 286, I, 3° bis du Code Général des Impôts (loi anti-fraude n° 2015-1785 de finances pour 2016).
+        </p>
+
+        <div class="pillar">
+            <strong>1. Condition d'Inaltérabilité :</strong><br>
+            Le logiciel interdit formellement la modification ou la suppression directe des factures dès leur émission. Toute rectification commerciale fait l'objet d'une facture d'avoir rectificative dûment référencée et chaînée.
+        </div>
+        <div class="pillar">
+            <strong>2. Condition de Sécurisation :</strong><br>
+            Toutes les transactions, encaissements et pièces de facturation sont tracés chronologiquement sans rupture de séquence avec horodatage strict et contrôle de doublons.
+        </div>
+        <div class="pillar">
+            <strong>3. Condition de Conservation & Archivage :</strong><br>
+            Le système assure la conservation intégrale des données de facturation et des règlements dans le Livre des Recettes officiel sur la durée légale de six (6) ans requise par l'administration fiscale, avec possibilité d'exportation standardisée.
+        </div>
+
+        <p style="font-size: 11px; color: #666; margin-top: 25px;">
+            La présente attestation est délivrée pour valoir ce que de droit en cas de contrôle de l'administration fiscale.
+        </p>
+
+        <div class="sig-box">
+            Fait à {ent_d['adresse'].split(',')[-1].strip()}, le {today_fr}<br><br>
+            <strong>Pour l'Éditeur Themis ERP</strong><br>
+            Cachet et Signature autorisée :
+        </div>
+    </div></body></html>"""
+
+
+def generate_facturx_xml(facture_row, ent):
+    """Génère la chaîne XML conforme à la norme Factur-X / CII (Profil Basic/Comfort)."""
+    f = dict(facture_row) if hasattr(facture_row, "keys") else facture_row
+    ent_d = dict(ent) if hasattr(ent, "keys") else ent
+
+    montant_ht = float(f["montant_ht"])
+    is_tva = (ent_d.get("assujetti_tva") == 1)
+    taux_tva = float(ent_d.get("taux_tva_defaut") or 8.5) if is_tva else 0.0
+    montant_tva = (montant_ht * (taux_tva / 100.0)) if is_tva else 0.0
+    montant_ttc = montant_ht + montant_tva
+    issue_date_nodash = f["date_facture"].replace("-", "")
+
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+                          xmlns:cram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+                          xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
+    <rsm:ExchangedDocumentContext>
+        <cram:GuidelineSpecifiedDocumentContextParameter>
+            <cram:ID>urn:factur-x.eu:1p0:basic</cram:ID>
+        </cram:GuidelineSpecifiedDocumentContextParameter>
+    </rsm:ExchangedDocumentContext>
+    <rsm:ExchangedDocument>
+        <cram:ID>{f['numero_facture']}</cram:ID>
+        <cram:TypeCode>380</cram:TypeCode>
+        <cram:IssueDateTime>
+            <udt:DateTimeString format="102">{issue_date_nodash}</udt:DateTimeString>
+        </cram:IssueDateTime>
+    </rsm:ExchangedDocument>
+    <rsm:SupplyChainTradeTransaction>
+        <cram:ApplicableHeaderTradeAgreement>
+            <cram:SellerTradeParty>
+                <cram:Name>{ent_d['nom']}</cram:Name>
+                <cram:SpecifiedLegalOrganization>
+                    <cram:ID schemeID="0002">{ent_d['siret']}</cram:ID>
+                </cram:SpecifiedLegalOrganization>
+            </cram:SellerTradeParty>
+            <cram:BuyerTradeParty>
+                <cram:Name>{f.get('client_societe') or f.get('client_nom', 'Client')}</cram:Name>
+            </cram:BuyerTradeParty>
+        </cram:ApplicableHeaderTradeAgreement>
+        <cram:ApplicableHeaderTradeSettlement>
+            <cram:InvoiceCurrencyCode>EUR</cram:InvoiceCurrencyCode>
+            <cram:SpecifiedTradeSettlementPaymentMeans>
+                <cram:TypeCode>42</cram:TypeCode>
+                <cram:PayeePartyCreditorFinancialAccount>
+                    <cram:IBANID>{ent_d.get('iban', '')}</cram:IBANID>
+                </cram:PayeePartyCreditorFinancialAccount>
+            </cram:SpecifiedTradeSettlementPaymentMeans>
+            <cram:SpecifiedTradeSettlementHeaderMonetarySummation>
+                <cram:LineTotalAmount>{montant_ht:.2f}</cram:LineTotalAmount>
+                <cram:TaxBasisTotalAmount>{montant_ht:.2f}</cram:TaxBasisTotalAmount>
+                <cram:TaxTotalAmount currencyID="EUR">{montant_tva:.2f}</cram:TaxTotalAmount>
+                <cram:GrandTotalAmount>{montant_ttc:.2f}</cram:GrandTotalAmount>
+                <cram:DuePayableAmount>{montant_ttc:.2f}</cram:DuePayableAmount>
+            </cram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        </cram:ApplicableHeaderTradeSettlement>
+    </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>"""    
