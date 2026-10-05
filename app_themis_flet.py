@@ -1258,7 +1258,7 @@ def view_livret_accueil(page: ft.Page):
             tf.write(html)
             temp_path = tf.name
         webbrowser.open(f"file://{temp_path}")
-        show_toast(page, "Livret d'accueil ouvert pour impression PDF.")
+        show_toast(page, "Livret d'accueil complet ouvert pour impression PDF.")
 
     def guide_section(title, icon_char, content_widgets):
         return ft.ExpansionTile(
@@ -1270,12 +1270,12 @@ def view_livret_accueil(page: ft.Page):
 
     return ft.ListView(
         controls=[
-            create_header("📘", "Manuel & Livret d'Accueil Themis ERP", "Guide complet d'exploitation et règles de gestion de votre micro-entreprise"),
+            create_header("📘", "Manuel d'Exploitation & Livret d'Accueil", "Guide complet de gestion, règles fiscales et automatisations Themis ERP"),
             create_card(
                 ft.Row([
                     ft.Column([
-                        ft.Text("Documentation Officielle d'Exploitation", size=16, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
-                        ft.Text("Ce livret synthétise l'ensemble des modules, automatisations et règles légales intégrées dans votre ERP.", size=12, color=THEME["text_muted"]),
+                        ft.Text("Documentation Officielle d'Exploitation Themis", size=16, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
+                        ft.Text("Synthèse intégrale des modules, de la facturation électronique 2026 et des processus automatisés.", size=12, color=THEME["text_muted"]),
                     ], expand=True),
                     ft.ElevatedButton("🖨️ Imprimer le Livret Complet (PDF)", icon=ft.icons.PRINT_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, height=45, on_click=print_livret_pdf),
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
@@ -1285,50 +1285,62 @@ def view_livret_accueil(page: ft.Page):
             create_card(
                 ft.Column([
                     guide_section(
-                        "1. Philosophie & Piliers Fondateurs", "🏛️",
+                        "1. Philosophie & Piliers Juridiques Fondateurs", "🏛️",
                         [
-                            ft.Text("Themis ERP est conçu pour les micro-entrepreneurs du numérique (automatisations, développement logiciel, intégration d'APIs).", size=12),
-                            ft.Text("• Sécurité juridique absolue : Dossier contractuel exhaustif de 7 pages (CGV 14 articles, SLA 9 articles, NDA 6 articles, PV de recette).", size=12),
+                            ft.Text("Themis ERP est conçu pour les micro-entrepreneurs et prestataires techniques (APIs, automatisation Make, développement logiciel).", size=12),
+                            ft.Text("• Sécurité juridique absolue : Dossier contractuel de 7 pages (CGV 14 articles, SLA 9 articles, NDA 6 articles, PV de recette).", size=12),
                             ft.Text("• Verrouillage anti-travail gratuit : Scope-Shield avec avenants flash pour facturer immédiatement les ajouts en cours de mission.", size=12),
-                            ft.Text("• Sérénité fiscale : Calcul automatique de vos cotisations URSSAF et surveillance permanente des seuils de TVA.", size=12),
+                            ft.Text("• Sérénité fiscale : Calcul automatique des cotisations URSSAF et surveillance permanente des seuils de TVA.", size=12),
                         ]
                     ),
                     guide_section(
-                        "2. Tableau de Bord & Pilotage Financier", "🧭",
+                        "2. Tableau de Bord & Radar de Vigilance Trésorerie", "🧭",
                         [
-                            ft.Text("• CA Encaissé Réel : Sommes effectivement perçues sur le compte bancaire, distinctes du simple facturé.", size=12),
+                            ft.Text("• Radar de Trésorerie en Direct : Détection immédiate des acomptes signés non facturés, soldes de livraison et factures échues.", size=12),
+                            ft.Text("• CA Réel Encaissé : Calculé strictement sur les encaissements perçus (comptabilité de caisse URSSAF).", size=12),
                             ft.Text("• Double Jauge Légale : Surveillance du seuil de TVA (36 800 €) avec alerte couleur et du plafond micro (77 700 €).", size=12),
-                            ft.Text("• Échéancier Trimestriel T1-T4 : Affiche en direct le montant exact à payer à l'URSSAF (21,2 %) et aux Impôts (2,2 %).", size=12),
-                            ft.Text("• Marge Nette Réelle : Calculée après déduction de vos dépenses réelles et de vos charges fiscales et sociales.", size=12),
+                            ft.Text("• Échéancier Trimestriel T1-T4 : Affiche en direct le montant exact dû à l'URSSAF (21,2 %) et aux Impôts (2,2 %).", size=12),
+                            ft.Text("• Synchronisation Comptable : Passage en 'Acquittée' synchronisé au Livre des Recettes, et purge immédiate si remise en attente.", size=12),
                         ]
                     ),
                     guide_section(
-                        "3. Commercial, CRM & Fiches 360°", "👥",
+                        "3. Recouvrement Automatisé Make & Journal des Relances", "✉️",
                         [
-                            ft.Text("• Portefeuille Client 360° : Synthèse instantanée du CA encaissé (LTV), des abonnements récurrents et des travaux réalisés.", size=12),
-                            ft.Text("• Modal Popup Instantanée : Clic sur 'Inspecter 360°' ouvrant immédiatement le dossier sans défilement.", size=12),
-                            ft.Text("• Coffre-Fort de Secrets API : Répertoire chiffré des clés API et webhooks avec génération de Décharge de sécurité RGPD.", size=12),
-                            ft.Text("• Catalogue 8 Forfaits : Tarification standard des prestations d'automatisation, hébergement et maintenance récurrente.", size=12),
+                            ft.Text("• Rédaction Intégrale par Themis : Themis compose lui-même les emails en HTML stylisé (N1 Rappel, N2 Pénalités L441-10 + 40 €, N3 Mise en demeure avec suspension de contrat).", size=12),
+                            ft.Text("• Expédition Make & Accusé : Make reçoit le sujet et le message prêts à envoyer, et renvoie un accusé de réception 200 OK.", size=12),
+                            ft.Text("• Journal des Relances : Table d'audit complète avec traçabilité de la date d'acquittement et relecture de l'email envoyé en popup.", size=12),
                         ]
                     ),
                     guide_section(
-                        "4. Production, Projets & Livrables Techniques", "🚀",
+                        "4. Portefeuille Client 360° & Coffre-Fort de Secrets", "👥",
                         [
-                            ft.Text("• Conversion Devis en Projet : Dès qu'un devis est validé et signé, il est converti en projet Kanban en 1 clic.", size=12),
-                            ft.Text("• Kanban 4 Colonnes : Suivi de vos tâches (À faire, En cours, En test, Terminé) et calcul du taux horaire effectif réalisé (€/h).", size=12),
-                            ft.Text("• Scope-Shield (Avenants Flash) : Mini-contrat d'ajustement (+prix, +délai) en 30 secondes pour chaque demande hors-périmètre.", size=12),
-                            ft.Text("• Architecture Blueprint : Émission d'une fiche technique A4 schématisant le pipeline de données.", size=12),
-                            ft.Text("• Cockpit MCO : Enregistrement mensuel des requêtes et incidents pour éditer le rapport de maintenance qui fidélise vos abonnés.", size=12),
+                            ft.Text("• Synthèse Portefeuille : Valeur Vie Client (LTV / Total encaissé), abonnements récurrents actifs (€/mois) et santé comptable.", size=12),
+                            ft.Text("• Modal Popup 360° : Clic sur 'Inspecter 360°' ouvrant immédiatement le dossier sans défilement (Travaux, Abonnements MCO, Factures, Secrets).", size=12),
+                            ft.Text("• Décharge de Sécurité RGPD : Génération de l'attestation de restitution et de révocation des clés API en fin de projet.", size=12),
+                            ft.Text("• Catalogue 8 Forfaits : Tarification standardisée des prestations et abonnements récurrents.", size=12),
                         ]
                     ),
                     guide_section(
-                        "5. Facturation, Règlements & Coordonnées Bancaires", "⚖️",
+                        "5. Moteur Fiscal & Bascule TVA (Guadeloupe 8,5 % / France 20 %)", "📊",
                         [
-                            ft.Text("• Coordonnées Bancaires (IBAN/BIC) : Cartouche officiel imprimé sur factures, devis et bons de commande.", size=12),
-                            ft.Text("• Règle d'or de Themis : Aucune facture ne peut être émise sans devis validé et contrat formellement signé.", size=12),
-                            ft.Text("• Naming Explicite : Chaque facture porte la référence du client et le type pour éliminer tout risque d'erreur comptable.", size=12),
-                            ft.Text("• Abonnements Récurrents : Gestion de l'échéance mensuelle automatique synchronisée avec le radar de trésorerie.", size=12),
-                            ft.Text("• Synchro Livre des Recettes : Dès qu'une facture est acquittée, elle s'inscrit automatiquement dans votre registre officiel URSSAF.", size=12),
+                            ft.Text("• Franchise en Base : Facturation hors taxe avec mention obligatoire 'TVA non applicable, art. 293 B du CGI'.", size=12),
+                            ft.Text("• Bascule Assujetti en 1 Clic : Activation dans les Paramètres avec sélection du taux (8,5 % DOM Guadeloupe ou 20 % Métropole) et N° de TVA Intracommunautaire.", size=12),
+                            ft.Text("• Décomposition Facture : Calcul et affichage automatique du Total H.T., montant de la TVA et Total T.T.C.", size=12),
+                        ]
+                    ),
+                    guide_section(
+                        "6. Factur-X (Réforme 2026-2027) & Conformité Éditeur Art. 286", "⚡",
+                        [
+                            ft.Text("• Factur-X XML : Export normalisé (profil CII) prêt à être téléversé sur Chorus Pro et le Portail Public de Facturation.", size=12),
+                            ft.Text("• Attestation Éditeur Officielle : Génération du certificat d'inaltérabilité, de sécurisation et de conservation au titre de l'Art. 286 du CGI.", size=12),
+                        ]
+                    ),
+                    guide_section(
+                        "7. Coordonnées Bancaires, Sauvegardes & Exports Légaux", "💾",
+                        [
+                            ft.Text("• Cartouche Bancaire Officiel : IBAN, BIC et banque intégrés sur toutes les factures, devis et bons de commande.", size=12),
+                            ft.Text("• Sauvegarde ZIP en 1 Clic : Archive autonome horodatée de la base SQLite et de tous les scans de contrats clients.", size=12),
+                            ft.Text("• Exports Légaux : Extraction du Livre des Recettes et Registre des Dépenses en Excel (.xlsx) et CSV conformes au contrôle fiscal.", size=12),
                         ]
                     ),
                 ], spacing=10),
