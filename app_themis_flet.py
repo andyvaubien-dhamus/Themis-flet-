@@ -3364,7 +3364,7 @@ def view_dossier_contractuel(page: ft.Page):
 
     dd_select = ft.Dropdown(
         label="Sélectionner le devis :",
-        options=[ft.dropdown.Option(key=str(row[0]), text=f"{row[0]} — {row[1] or row[2]} ({'Signé ✅' if row[4] == 1 else 'Non signé ⚠️'})") for _, row in items.iterrows()],
+        options=[ft.dropdown.Option(key=str(row[0]), text=f"{row[0]} — {row[1] or row[2]} ({'Signé ✅' if row[4] == 1 else 'Non signé ⚠️'})") for row in items.itertuples(index=False)],
         value=default_devis,
         width=450,
     )
