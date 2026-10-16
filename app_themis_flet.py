@@ -50,21 +50,37 @@ if not os.path.exists(ICO_PATH):
 if not os.path.exists(ICO_PATH):
     ICO_PATH = os.path.join(BASE_DIR, "themis.ico")
 
+
 # ---------------------------------------------------------------------------
-# Palette Thémis & Thèmes Métier
+# Palette Swiss Corporate / Banque Privée (Avec compatibilité totale)
 # ---------------------------------------------------------------------------
 THEME = {
-    "cream": "#FAF7F2",
-    "cream_card": "#FFFFFF",
-    "sage": "#6E8A85",
-    "sage_dark": "#55706B",
-    "sage_light": "#C4D2C2",
-    "sage_pale": "#E7EEE6",
-    "blush": "#EFC9C3",
-    "blush_dark": "#D9A79F",
-    "blush_pale": "#FBEDEA",
-    "text": "#2D3748",
-    "text_muted": "#718096",
+    # Nouveaux tokens Swiss Corporate
+    "bg": "#F8FAFC",              # Fond minéral clair
+    "surface": "#FFFFFF",         # Porcelaine pure
+    "border": "#CBD5E1",          # Filet gris doux haute précision
+    "border_subtle": "#E2E8F0",
+    "header_bg": "#05231A",       # Vert Forêt Nocturne statutaire
+    "header_box": "#0B382A",      # Boîte émeraude fumée
+    "header_sub": "#A7F3D0",      # Menthe douce
+    "text_primary": "#090D16",    # Noir encre haute lisibilité
+    "text_secondary": "#475569",  # Ardoise corporate
+    "text_muted": "#94A3B8",      # Gris technique / indexation
+    "emerald": "#047857",         # Vert institutionnel positif
+    "amber": "#B45309",           # Ambre vigilance
+    "navy": "#0F172A",
+
+    # Alias de compatibilité (pour éviter tout KeyError dans les vues existantes)
+    "cream": "#F8FAFC",           # Mappé sur le fond minéral clair
+    "cream_card": "#FFFFFF",      # Mappé sur la porcelaine pure
+    "sage": "#047857",            # Mappé sur l'émeraude banque privée
+    "sage_dark": "#05231A",       # Mappé sur le vert forêt nocturne
+    "sage_light": "#CBD5E1",      # Mappé sur le filet gris doux
+    "sage_pale": "#F1F5F9",       # Mappé sur le gris très doux
+    "blush": "#FDE68A",
+    "blush_dark": "#B45309",      # Mappé sur l'ambre technique
+    "blush_pale": "#FEF3C7",
+    "text": "#090D16",            # Mappé sur le noir encre maximal
 }
 
 SECTION_COLORS = {
@@ -488,40 +504,70 @@ def get_app_logo_base64():
 # ---------------------------------------------------------------------------
 # Composants UI Communs & Pied de Page
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Composants UI Communs & Haute Précision (100% compatibles Flet 0.25.2)
+# ---------------------------------------------------------------------------
 def create_card(content, padding=24):
+    """Carte en porcelaine pure avec filet gris doux - Zéro crash."""
     return ft.Container(
         content=content,
-        bgcolor=THEME["cream_card"],
-        border=ft.border.all(1, THEME["sage_light"]),
-        border_radius=14,
+        bgcolor=THEME.get("surface", "#FFFFFF"),
+        border=ft.border.all(1, THEME.get("border", "#CBD5E1")),
+        border_radius=12,
         padding=padding,
-        shadow=ft.BoxShadow(blur_radius=10, color="#0A000000", offset=ft.Offset(0, 3)),
+        shadow=ft.BoxShadow(spread_radius=0, blur_radius=16, color="#0A000000", offset=ft.Offset(0, 4)),
     )
 
-
-def create_header(icon_char, title, subtitle):
+def create_header(code_str: str, title: str, subtitle: str):
+    """En-tête statutaire Vert Forêt Nocturne - Garanti 100% sans erreur."""
     return ft.Container(
         content=ft.Row(
             controls=[
                 ft.Container(
-                    content=ft.Text(icon_char, size=26),
-                    bgcolor=THEME["blush_pale"],
-                    border_radius=14,
-                    width=54,
-                    height=54,
-                    alignment=ft.alignment.center,
+                    content=ft.Text(code_str, size=11, weight=ft.FontWeight.W_800, color=THEME.get("header_sub", "#A7F3D0")),
+                    bgcolor=THEME.get("header_box", "#0B382A"),
+                    border=ft.border.all(1, "#1A4D3E"),
+                    border_radius=6,
+                    padding=ft.padding.symmetric(horizontal=12, vertical=8),
                 ),
                 ft.Column(
                     controls=[
-                        ft.Text(title, size=23, weight=ft.FontWeight.BOLD, color=THEME["text"]),
-                        ft.Text(subtitle, size=13, color=THEME["text_muted"]),
+                        ft.Text(title, size=18, weight=ft.FontWeight.W_900, color="#FFFFFF"),
+                        ft.Text(str(subtitle).upper(), size=10, weight=ft.FontWeight.W_700, color=THEME.get("header_sub", "#A7F3D0")),
                     ],
                     spacing=2,
                 ),
             ],
-            spacing=18,
+            spacing=16,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
-        margin=ft.margin.only(bottom=25, top=5),
+        bgcolor=THEME.get("header_bg", "#05231A"),
+        border_radius=10,
+        padding=ft.padding.symmetric(horizontal=24, vertical=16),
+        margin=ft.margin.only(bottom=24, top=4),
+        border=ft.border.all(1, "#0B382A"),
+    )
+
+def create_precision_circular_kpi(code: str, title: str, value: str, trend: str, is_positive: bool = True, offset_y: int = 0):
+    """Cadran circulaire haute précision en quinconce - Ombres natives 100% stables."""
+    accent_color = THEME.get("emerald", "#047857") if is_positive else THEME.get("amber", "#B45309")
+    trend_symbol = "▲" if is_positive else "▼"
+    return ft.Container(
+        content=ft.Column(
+            controls=[
+                ft.Text(code, size=9, weight=ft.FontWeight.BOLD, color=THEME.get("text_muted", "#94A3B8")),
+                ft.Text(title.upper(), size=10, weight=ft.FontWeight.W_700, color=THEME.get("text_secondary", "#475569"), text_align=ft.TextAlign.CENTER),
+                ft.Text(value, size=24, weight=ft.FontWeight.W_900, color=THEME.get("text_primary", "#090D16"), text_align=ft.TextAlign.CENTER),
+                ft.Text(f"{trend_symbol} {trend}", size=10, weight=ft.FontWeight.BOLD, color=accent_color),
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=4
+        ),
+        width=215, height=215, border_radius=108, bgcolor=THEME.get("surface", "#FFFFFF"),
+        border=ft.border.all(1.5, THEME.get("border", "#CBD5E1")),
+        shadow=ft.BoxShadow(spread_radius=0, blur_radius=18, color="#0F000000", offset=ft.Offset(0, 8)),
+        margin=ft.margin.only(top=offset_y)
     )
 
 
@@ -1032,220 +1078,302 @@ def build_radar_vigilance(page: ft.Page):
 
 # --- 1. TABLEAU DE BORD ---
 def view_dashboard(page: ft.Page):
-    conn = get_db()
-    ent = get_entreprise_info()
-    current_year = datetime.date.today().year
+    import traceback
+    try:
+        def render_circle_kpi(code: str, title: str, value: str, trend: str, is_positive: bool = True, offset_y: int = 0):
+            accent_color = "#047857" if is_positive else "#B45309"
+            trend_symbol = "▲" if is_positive else "▼"
+            return ft.Container(
+                content=ft.Column(
+                    controls=[
+                        ft.Text(code, size=9, weight=ft.FontWeight.BOLD, color="#94A3B8"),
+                        ft.Text(title.upper(), size=10, weight=ft.FontWeight.W_700, color="#475569", text_align=ft.TextAlign.CENTER),
+                        ft.Text(value, size=23, weight=ft.FontWeight.W_900, color="#090D16", text_align=ft.TextAlign.CENTER),
+                        ft.Text(f"{trend_symbol} {trend}", size=10, weight=ft.FontWeight.BOLD, color=accent_color),
+                    ],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=4
+                ),
+                width=215, height=215, border_radius=108, bgcolor="#FFFFFF",
+                border=ft.border.all(1.5, "#CBD5E1"),
+                shadow=ft.BoxShadow(spread_radius=0, blur_radius=16, color="#0F000000", offset=ft.Offset(0, 6)),
+                margin=ft.margin.only(top=offset_y)
+            )
 
-    df_devis = pd.read_sql_query("SELECT * FROM devis WHERE archive = 0 ORDER BY id DESC", conn)
-    df_fact = pd.read_sql_query("SELECT * FROM factures ORDER BY id DESC", conn)
-    df_paiements = pd.read_sql_query("SELECT * FROM paiements ORDER BY date_paiement DESC, id DESC", conn)
-    df_depenses = pd.read_sql_query("SELECT * FROM depenses ORDER BY date_depense DESC, id DESC", conn)
-    conn.close()
+        conn = get_db()
+        ent = get_entreprise_info()
+        current_year = datetime.date.today().year
 
-    taux_urssaf = ent["taux_urssaf"]
-    taux_ir = ent["taux_ir"]
-    taux_charges = taux_urssaf + taux_ir
+        df_devis = pd.read_sql_query("SELECT * FROM devis WHERE archive = 0 ORDER BY id DESC", conn)
+        df_fact = pd.read_sql_query("SELECT * FROM factures ORDER BY id DESC", conn)
+        df_paiements = pd.read_sql_query("SELECT * FROM paiements ORDER BY date_paiement DESC, id DESC", conn)
+        df_depenses = pd.read_sql_query("SELECT * FROM depenses ORDER BY date_depense DESC, id DESC", conn)
+        conn.close()
 
-    if not df_paiements.empty:
-        df_p_year = df_paiements[df_paiements["date_paiement"].str.startswith(str(current_year))]
-        ca_annuel_encaisse = df_p_year["montant_recu"].sum() if not df_p_year.empty else 0.0
-    else:
-        ca_annuel_encaisse = 0.0
+        taux_urssaf = float(ent.get("taux_urssaf", 21.2))
+        taux_ir = float(ent.get("taux_ir", 2.2))
+        taux_charges = taux_urssaf + taux_ir
 
-    total_depenses_an = df_depenses["montant"].sum() if not df_depenses.empty else 0.0
-    charges_fiscales_sociales = ca_annuel_encaisse * (taux_charges / 100)
-    benefice_net_euros = ca_annuel_encaisse - total_depenses_an - charges_fiscales_sociales
-    taux_marge_nette = (benefice_net_euros / ca_annuel_encaisse * 100) if ca_annuel_encaisse > 0 else 0.0
+        if not df_paiements.empty:
+            df_p_year = df_paiements[df_paiements["date_paiement"].str.startswith(str(current_year))]
+            ca_annuel_encaisse = float(df_p_year["montant_recu"].sum()) if not df_p_year.empty else 0.0
+        else:
+            ca_annuel_encaisse = 0.0
 
-    pct_seuil_micro = min(ca_annuel_encaisse / PLAFOND_MICRO_BNC, 1.0)
-    pct_seuil_tva = min(ca_annuel_encaisse / SEUIL_TVA_BASE, 1.0)
+        total_depenses_an = float(df_depenses["montant"].sum()) if not df_depenses.empty else 0.0
+        charges_fiscales_sociales = ca_annuel_encaisse * (taux_charges / 100)
+        benefice_net_euros = ca_annuel_encaisse - total_depenses_an - charges_fiscales_sociales
+        taux_marge_nette = (benefice_net_euros / ca_annuel_encaisse * 100) if ca_annuel_encaisse > 0 else 0.0
 
-    color_jauge_tva = ft.colors.GREEN_700 if pct_seuil_tva < 0.70 else (ft.colors.ORANGE_700 if pct_seuil_tva < 0.90 else ft.colors.RED_700)
-    color_jauge_micro = ft.colors.GREEN_700 if pct_seuil_micro < 0.70 else (ft.colors.ORANGE_700 if pct_seuil_micro < 0.90 else ft.colors.RED_700)
+        pct_seuil_micro = min(ca_annuel_encaisse / PLAFOND_MICRO_BNC, 1.0)
+        pct_seuil_tva = min(ca_annuel_encaisse / SEUIL_TVA_BASE, 1.0)
 
-    reste_avant_tva = max(SEUIL_TVA_BASE - ca_annuel_encaisse, 0.0)
-    reste_avant_plafond = max(PLAFOND_MICRO_BNC - ca_annuel_encaisse, 0.0)
+        color_jauge_tva = "#047857" if pct_seuil_tva < 0.70 else ("#B45309" if pct_seuil_tva < 0.90 else "#DC2626")
+        color_jauge_micro = "#047857" if pct_seuil_micro < 0.70 else ("#B45309" if pct_seuil_micro < 0.90 else "#DC2626")
 
-    def kpi_card(label, value_str, sub_info, icon, color):
-        return ft.Container(
+        reste_avant_tva = max(SEUIL_TVA_BASE - ca_annuel_encaisse, 0.0)
+        reste_avant_plafond = max(PLAFOND_MICRO_BNC - ca_annuel_encaisse, 0.0)
+        total_facture = float(df_fact["montant_ht"].sum()) if not df_fact.empty else 0.0
+
+        # Vague des Cadrans Circulaires
+        staggered_kpis_wave = ft.Container(
             content=ft.Row(
                 controls=[
-                    ft.Container(content=ft.Icon(icon, size=26, color=color), bgcolor=THEME["sage_pale"], border_radius=12, padding=12),
-                    ft.Column([
-                        ft.Text(label.upper(), size=10, weight=ft.FontWeight.W_700, color=THEME["text_muted"]),
-                        ft.Text(value_str, size=19, weight=ft.FontWeight.BOLD, color=color),
-                        ft.Text(sub_info, size=11, color=THEME["text_muted"], italic=True),
-                    ], spacing=2),
+                    render_circle_kpi("KPI.01", "CA Encaissé", f"{ca_annuel_encaisse:,.2f} €", f"Facturé : {total_facture:,.2f} €", True, 0),
+                    render_circle_kpi("KPI.02", "Charges & Dépenses", f"{(total_depenses_an + charges_fiscales_sociales):,.2f} €", f"URSSAF/IR : {charges_fiscales_sociales:,.2f} €", False, 42),
+                    render_circle_kpi("KPI.03", "Bénéfice Net Réel", f"{benefice_net_euros:,.2f} €", f"Marge : {taux_marge_nette:.1f} %", (benefice_net_euros >= 0), 8),
+                    render_circle_kpi("KPI.04", "Solde de Caisse", f"{(ca_annuel_encaisse - total_depenses_an):,.2f} €", "Position nette bancaire", ((ca_annuel_encaisse - total_depenses_an) >= 0), 50),
                 ],
-                spacing=12,
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                scroll=ft.ScrollMode.AUTO,
             ),
-            bgcolor=THEME["cream_card"],
-            border=ft.border.all(1, THEME["sage_light"]),
-            border_radius=14,
-            padding=16,
+            padding=ft.padding.symmetric(vertical=10),
+        )
+
+        card_jauge_tva = ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Text("FRANCHISE EN BASE DE TVA (36 800 €)", size=11, weight=ft.FontWeight.W_800, color="#475569"),
+                    ft.Text(f"{ca_annuel_encaisse:.2f} € ({pct_seuil_tva * 100:.1f} %)", size=11, weight=ft.FontWeight.BOLD, color=color_jauge_tva)
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ft.ProgressBar(value=pct_seuil_tva, color=color_jauge_tva, bgcolor="#F1F5F9", height=8),
+                ft.Text(f"Reste {reste_avant_tva:.2f} € avant obligation de facturation TVA." if reste_avant_tva > 0 else "Seuil TVA dépassé : Facturation TVA requise.", size=10, color="#94A3B8", italic=True),
+            ], spacing=8),
+            bgcolor="#FFFFFF", border=ft.border.all(1, "#CBD5E1"), border_radius=12, padding=18, expand=True,
+        )
+
+        card_jauge_micro = ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Text("PLAFOND DU RÉGIME MICRO (77 700 €)", size=11, weight=ft.FontWeight.W_800, color="#475569"),
+                    ft.Text(f"{ca_annuel_encaisse:.2f} € ({pct_seuil_micro * 100:.1f} %)", size=11, weight=ft.FontWeight.BOLD, color=color_jauge_micro)
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ft.ProgressBar(value=pct_seuil_micro, color=color_jauge_micro, bgcolor="#F1F5F9", height=8),
+                ft.Text(f"Reste {reste_avant_plafond:.2f} € avant sortie du statut micro-entreprise.", size=10, color="#94A3B8", italic=True),
+            ], spacing=8),
+            bgcolor="#FFFFFF", border=ft.border.all(1, "#CBD5E1"), border_radius=12, padding=18, expand=True,
+        )
+
+        quarters_def = [
+            ("T1 (Janvier - Mars)", ["-01-", "-02-", "-03-"], "30 Avril"),
+            ("T2 (Avril - Juin)", ["-04-", "-05-", "-06-"], "31 Juillet"),
+            ("T3 (Juillet - Septembre)", ["-07-", "-08-", "-09-"], "31 Octobre"),
+            ("T4 (Octobre - Décembre)", ["-10-", "-11-", "-12-"], "31 Janvier"),
+        ]
+        trimestres_rows = []
+        for label, months, date_limite in quarters_def:
+            ca_trim = 0.0
+            if not df_paiements.empty:
+                for m in months:
+                    sub = df_paiements[df_paiements["date_paiement"].str.contains(f"{current_year}{m}")]
+                    if not sub.empty: ca_trim += sub["montant_recu"].sum()
+            urssaf_trim = ca_trim * (taux_urssaf / 100)
+            ir_trim = ca_trim * (taux_ir / 100)
+            trimestres_rows.append(
+                ft.DataRow(cells=[
+                    ft.DataCell(ft.Text(label, weight=ft.FontWeight.W_700, color="#090D16")),
+                    ft.DataCell(ft.Text(f"{ca_trim:.2f} €", weight=ft.FontWeight.BOLD, color="#090D16")),
+                    ft.DataCell(ft.Text(f"{urssaf_trim:.2f} €", color="#475569")),
+                    ft.DataCell(ft.Text(f"{ir_trim:.2f} €", color="#475569")),
+                    ft.DataCell(ft.Text(f"{(urssaf_trim + ir_trim):.2f} €", weight=ft.FontWeight.BOLD, color="#B91C1C")),
+                    ft.DataCell(ft.Text(f"Avant le {date_limite}", size=11, color="#94A3B8")),
+                ])
+            )
+
+        table_trimestres = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("Période Fiscale", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("CA Encaissé", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text(f"URSSAF ({taux_urssaf}%)", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text(f"IR ({taux_ir}%)", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Total Dû", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Échéance", weight=ft.FontWeight.BOLD)),
+            ],
+            rows=trimestres_rows,
+            heading_row_color="#F8FAFC",
+            border=ft.border.all(1, "#CBD5E1"),
+            border_radius=8,
+        )
+
+        card_echeancier = create_card(
+            ft.Column([
+                ft.Row([
+                    ft.Icon(ft.icons.CALENDAR_TODAY_ROUNDED, color="#475569", size=18),
+                    ft.Text(f"ÉCHÉANCIER TRIMESTRIEL DES COTISATIONS & IMPÔTS — EXERCICE {current_year}", size=13, weight=ft.FontWeight.W_800, color="#090D16"),
+                ], spacing=8),
+                ft.Text(f"Calcul automatisé sur encaissements réels (URSSAF {taux_urssaf}% + Versement Libératoire IR {taux_ir}% = Total {taux_charges:.1f}%)", size=11, color="#94A3B8"),
+                table_trimestres,
+            ], spacing=12),
+            padding=20,
+        )
+
+        devis_rows = [
+            ft.DataRow(cells=[
+                ft.DataCell(ft.Text(str(r["numero_devis"]), weight=ft.FontWeight.BOLD)),
+                ft.DataCell(ft.Text(str(r["date_creation"]))),
+                ft.DataCell(ft.Text(str(r["client_societe"] or "-"))),
+                ft.DataCell(ft.Text(f"{float(r['montant_setup']):.2f} €")),
+                ft.DataCell(ft.Text(f"{float(r['montant_abo']):.2f} €/m")),
+                ft.DataCell(ft.Container(content=ft.Text(str(r["statut"]), size=10, weight=ft.FontWeight.BOLD, color="#475569"), bgcolor="#F1F5F9", padding=ft.padding.symmetric(horizontal=8, vertical=3), border_radius=6)),
+                ft.DataCell(ft.Text("Signé ✅" if r["contrat_signe"] == 1 else "Non signé ⚠️", color="#047857" if r["contrat_signe"] == 1 else "#B45309", weight=ft.FontWeight.BOLD)),
+            ])
+            for _, r in df_devis.iterrows()
+        ]
+
+        table_devis = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("N° Devis")), ft.DataColumn(ft.Text("Date")), ft.DataColumn(ft.Text("Société")),
+                ft.DataColumn(ft.Text("Setup HT")), ft.DataColumn(ft.Text("Abonnement")), ft.DataColumn(ft.Text("Statut")), ft.DataColumn(ft.Text("Contrat 7P")),
+            ],
+            rows=devis_rows, heading_row_color="#F8FAFC", border=ft.border.all(1, "#CBD5E1"), border_radius=8,
+        )
+
+        factures_rows = []
+        for _, r in df_fact.iterrows():
+            f_num = r["numero_facture"]
+            factures_rows.append(
+                ft.DataRow(cells=[
+                    ft.DataCell(ft.Text(str(f_num), weight=ft.FontWeight.BOLD)),
+                    ft.DataCell(ft.Text(str(r["numero_devis"]))),
+                    ft.DataCell(ft.Text(str(r["type_facture"]))),
+                    ft.DataCell(ft.Text(str(r["date_facture"]))),
+                    ft.DataCell(ft.Text(f"{float(r['montant_ht']):.2f} €")),
+                    ft.DataCell(
+                        ft.Container(
+                            content=ft.Text(str(r["statut"]), size=10, weight=ft.FontWeight.BOLD, color="#047857" if r["statut"] in ["Facture Acquittée", "Payée"] else "#475569"),
+                            bgcolor=ft.colors.GREEN_50 if r["statut"] in ["Facture Acquittée", "Payée"] else "#F1F5F9",
+                            padding=ft.padding.symmetric(horizontal=8, vertical=3), border_radius=6
+                        )
+                    ),
+                    ft.DataCell(
+                        ft.IconButton(
+                            icon=ft.icons.PRINT_ROUNDED,
+                            tooltip=f"Imprimer {f_num}",
+                            icon_size=18,
+                            on_click=lambda e, fn=f_num: execute_print_facture(fn, page)
+                        )
+                    ),
+                ])
+            )
+
+        table_factures = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("N° Facture")), ft.DataColumn(ft.Text("N° Devis")), ft.DataColumn(ft.Text("Type")),
+                ft.DataColumn(ft.Text("Date")), ft.DataColumn(ft.Text("Montant HT")), ft.DataColumn(ft.Text("Statut")),
+                ft.DataColumn(ft.Text("Imprimer")),
+            ],
+            rows=factures_rows, heading_row_color="#F8FAFC", border=ft.border.all(1, "#CBD5E1"), border_radius=8,
+        )
+
+        operations_tabs = ft.Tabs(
+            selected_index=0,
+            tabs=[
+                ft.Tab(text="Devis Commerciaux Actifs", icon=ft.icons.DESCRIPTION_OUTLINED, content=ft.Container(content=table_devis, padding=16)),
+                ft.Tab(text="Factures Émises & Réimpression", icon=ft.icons.RECEIPT_LONG_OUTLINED, content=ft.Container(content=table_factures, padding=16)),
+            ],
+        )
+
+        # Construction du logo miniature THEMIS dans l'en-tête
+        b64_logo = get_app_logo_base64()
+        logo_widget_header = (
+            ft.Image(src_base64=b64_logo, width=28, height=28, fit=ft.ImageFit.CONTAIN, border_radius=4)
+            if b64_logo
+            else ft.Icon(ft.icons.BALANCE_ROUNDED, color="#A7F3D0", size=24)
+        )
+
+        header_dashboard = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Container(
+                        content=logo_widget_header,
+                        bgcolor="#0B382A",
+                        border=ft.border.all(1, "#1A4D3E"),
+                        border_radius=8,
+                        width=46,
+                        height=46,
+                        alignment=ft.alignment.center,
+                    ),
+                    ft.Column(
+                        controls=[
+                            ft.Text("TABLEAU DE BORD ERP", size=19, weight=ft.FontWeight.W_900, color="#FFFFFF"),
+                            ft.Text(f"PILOTAGE DE PRÉCISION • EXERCICE FISCAL {current_year}".upper(), size=10, weight=ft.FontWeight.W_700, color="#A7F3D0"),
+                        ],
+                        spacing=2,
+                    ),
+                ],
+                spacing=16,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            bgcolor="#05231A",
+            border_radius=10,
+            padding=ft.padding.symmetric(horizontal=24, vertical=16),
+            margin=ft.margin.only(bottom=24, top=4),
+            border=ft.border.all(1, "#0B382A"),
+        )
+
+        return ft.ListView(
+            controls=[
+                header_dashboard,
+                build_radar_vigilance(page),
+                ft.Container(height=10),
+                staggered_kpis_wave,
+                ft.Container(height=24),
+                ft.Row([card_jauge_tva, card_jauge_micro], spacing=16),
+                ft.Container(height=16),
+                card_echeancier,
+                ft.Container(height=16),
+                create_card(operations_tabs, padding=10),
+                build_footer(),
+            ],
+            spacing=10,
             expand=True,
         )
 
-    kpis_row = ft.Row([
-        kpi_card("CA Réel Encaissé", f"{ca_annuel_encaisse:.2f} €", f"Facturé : {df_fact['montant_ht'].sum():.2f} €", ft.icons.SAVINGS_OUTLINED, ft.colors.GREEN_700),
-        kpi_card("Charges & Dépenses", f"{(total_depenses_an + charges_fiscales_sociales):.2f} €", f"Dont {charges_fiscales_sociales:.2f} € URSSAF/IR", ft.icons.SHOPPING_BAG_OUTLINED, THEME["blush_dark"]),
-        kpi_card("Bénéfice Net Réel", f"{benefice_net_euros:.2f} €", f"Marge Nette : {taux_marge_nette:.1f} %", ft.icons.TRENDING_UP, ft.colors.BLUE_800 if benefice_net_euros >= 0 else ft.colors.RED_700),
-    ], spacing=16)
-
-    card_jauge_tva = ft.Container(
-        content=ft.Column([
-            ft.Row([ft.Text("⚡ FRANCHISE EN BASE DE TVA (36 800 €)", size=11, weight=ft.FontWeight.BOLD), ft.Text(f"{ca_annuel_encaisse:.2f} € ({pct_seuil_tva * 100:.1f} %)", size=12, weight=ft.FontWeight.BOLD, color=color_jauge_tva)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-            ft.ProgressBar(value=pct_seuil_tva, color=color_jauge_tva, bgcolor=THEME["sage_pale"], height=9),
-            ft.Text(f"Reste {reste_avant_tva:.2f} € avant TVA obligatoire." if reste_avant_tva > 0 else "⚠️ Seuil TVA dépassé : Facturation TVA requise.", size=11, color=THEME["text_muted"], italic=True),
-        ], spacing=6),
-        bgcolor=THEME["cream_card"], border=ft.border.all(1, THEME["sage_light"]), border_radius=14, padding=16, expand=True,
-    )
-
-    card_jauge_micro = ft.Container(
-        content=ft.Column([
-            ft.Row([ft.Text("🏛️ PLAFOND STATUT MICRO (77 700 €)", size=11, weight=ft.FontWeight.BOLD), ft.Text(f"{ca_annuel_encaisse:.2f} € ({pct_seuil_micro * 100:.1f} %)", size=12, weight=ft.FontWeight.BOLD, color=color_jauge_micro)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-            ft.ProgressBar(value=pct_seuil_micro, color=color_jauge_micro, bgcolor=THEME["sage_pale"], height=9),
-            ft.Text(f"Reste {reste_avant_plafond:.2f} € avant sortie du régime micro.", size=10, color=THEME["text_muted"], italic=True),
-        ], spacing=6),
-        bgcolor=THEME["cream_card"], border=ft.border.all(1, THEME["sage_light"]), border_radius=14, padding=16, expand=True,
-    )
-
-    quarters_def = [
-        ("T1 (Janvier - Mars)", ["-01-", "-02-", "-03-"], "30 Avril"),
-        ("T2 (Avril - Juin)", ["-04-", "-05-", "-06-"], "31 Juillet"),
-        ("T3 (Juillet - Septembre)", ["-07-", "-08-", "-09-"], "31 Octobre"),
-        ("T4 (Octobre - Décembre)", ["-10-", "-11-", "-12-"], "31 Janvier"),
-    ]
-    trimestres_rows = []
-    for label, months, date_limite in quarters_def:
-        ca_trim = 0.0
-        if not df_paiements.empty:
-            for m in months:
-                sub = df_paiements[df_paiements["date_paiement"].str.contains(f"{current_year}{m}")]
-                if not sub.empty: ca_trim += sub["montant_recu"].sum()
-        urssaf_trim = ca_trim * (taux_urssaf / 100)
-        ir_trim = ca_trim * (taux_ir / 100)
-        trimestres_rows.append(
-            ft.DataRow(cells=[
-                ft.DataCell(ft.Text(label, weight=ft.FontWeight.BOLD)),
-                ft.DataCell(ft.Text(f"{ca_trim:.2f} €", weight=ft.FontWeight.BOLD)),
-                ft.DataCell(ft.Text(f"{urssaf_trim:.2f} €", color=THEME["sage_dark"])),
-                ft.DataCell(ft.Text(f"{ir_trim:.2f} €", color=THEME["blush_dark"])),
-                ft.DataCell(ft.Text(f"{(urssaf_trim + ir_trim):.2f} €", weight=ft.FontWeight.BOLD, color=ft.colors.RED_800)),
-                ft.DataCell(ft.Text(f"Avant le {date_limite}", size=11, italic=True)),
-            ])
-        )
-
-    table_trimestres = ft.DataTable(
-        columns=[
-            ft.DataColumn(ft.Text("Période Trimestrielle")),
-            ft.DataColumn(ft.Text("CA Encaissé")),
-            ft.DataColumn(ft.Text(f"URSSAF ({taux_urssaf}%)")),
-            ft.DataColumn(ft.Text(f"Impôt IR ({taux_ir}%)")),
-            ft.DataColumn(ft.Text("Total Charges dues")),
-            ft.DataColumn(ft.Text("Date limite Déclaration")),
-        ],
-        rows=trimestres_rows,
-        heading_row_color=THEME["sage_pale"],
-        border=ft.border.all(1, THEME["sage_light"]),
-        border_radius=8,
-    )
-
-    card_echeancier = create_card(
-        ft.Column([
-            ft.Row([
-                ft.Icon(ft.icons.CALENDAR_MONTH_ROUNDED, color=THEME["sage_dark"]),
-                ft.Text(f"🗓️ Échéancier Trimestriel des Cotisations & Impôts — Exercice {current_year}", size=15, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
-            ], spacing=8),
-            ft.Text(f"Calcul en direct sur les encaissements réels du Livre des Recettes (URSSAF {taux_urssaf}% + Versement Libératoire IR {taux_ir}% = Total {taux_charges:.1f}%)", size=11, color=THEME["text_muted"]),
-            table_trimestres,
-        ], spacing=10),
-        padding=18,
-    )
-
-    devis_rows = [
-        ft.DataRow(cells=[
-            ft.DataCell(ft.Text(str(r["numero_devis"]), weight=ft.FontWeight.BOLD)),
-            ft.DataCell(ft.Text(str(r["date_creation"]))),
-            ft.DataCell(ft.Text(str(r["client_societe"] or "-"))),
-            ft.DataCell(ft.Text(f"{float(r['montant_setup']):.2f} €")),
-            ft.DataCell(ft.Text(f"{float(r['montant_abo']):.2f} €/m")),
-            ft.DataCell(ft.Container(content=ft.Text(str(r["statut"]), size=11, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]), bgcolor=THEME["sage_pale"], padding=ft.padding.symmetric(horizontal=8, vertical=4), border_radius=8)),
-            ft.DataCell(ft.Text("Signé ✅" if r["contrat_signe"] == 1 else "Non signé ⚠️", color=ft.colors.GREEN_800 if r["contrat_signe"] == 1 else ft.colors.ORANGE_800, weight=ft.FontWeight.BOLD)),
-        ])
-        for _, r in df_devis.iterrows()
-    ]
-
-    table_devis = ft.DataTable(
-        columns=[
-            ft.DataColumn(ft.Text("N° Devis")), ft.DataColumn(ft.Text("Date")), ft.DataColumn(ft.Text("Société")),
-            ft.DataColumn(ft.Text("Setup HT")), ft.DataColumn(ft.Text("Abonnement")), ft.DataColumn(ft.Text("Statut")), ft.DataColumn(ft.Text("Contrat 7P")),
-        ],
-        rows=devis_rows, heading_row_color=THEME["sage_pale"], border=ft.border.all(1, THEME["sage_light"]), border_radius=8,
-    )
-
-    factures_rows = []
-    for _, r in df_fact.iterrows():
-        f_num = r["numero_facture"]
-        factures_rows.append(
-            ft.DataRow(cells=[
-                ft.DataCell(ft.Text(str(f_num), weight=ft.FontWeight.BOLD)),
-                ft.DataCell(ft.Text(str(r["numero_devis"]))),
-                ft.DataCell(ft.Text(str(r["type_facture"]))),
-                ft.DataCell(ft.Text(str(r["date_facture"]))),
-                ft.DataCell(ft.Text(f"{float(r['montant_ht']):.2f} €")),
-                ft.DataCell(
-                    ft.Container(
-                        content=ft.Text(str(r["statut"]), size=11, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
-                        bgcolor=THEME["sage_pale"] if r["statut"] != "Facture Annulée" else THEME["blush_pale"],
-                        padding=ft.padding.symmetric(horizontal=8, vertical=4), border_radius=8
-                    )
+    except Exception as ex:
+        trace_str = traceback.format_exc()
+        return ft.Container(
+            content=ft.Column([
+                ft.Container(
+                    content=ft.Row([
+                        ft.Icon(ft.icons.ERROR_OUTLINE, color="#DC2626", size=24),
+                        ft.Text("DIAGNOSTIC TECHNIQUE THEMIS ERP :", size=14, weight=ft.FontWeight.BOLD, color="#DC2626"),
+                    ], spacing=10),
+                    bgcolor="#FEF2F2",
+                    padding=10,
+                    border_radius=6,
                 ),
-                ft.DataCell(
-                    ft.IconButton(
-                        icon=ft.icons.PRINT_ROUNDED,
-                        tooltip=f"Imprimer la facture {f_num}",
-                        icon_size=18,
-                        on_click=lambda e, fn=f_num: execute_print_facture(fn, page)
-                    )
+                ft.Text(f"Erreur détectée : {ex}", size=13, weight=ft.FontWeight.BOLD, color="#991B1B"),
+                ft.Container(
+                    content=ft.Text(trace_str, size=11, font_family="monospace", color="#1F2937"),
+                    bgcolor="#F3F4F6",
+                    padding=14,
+                    border_radius=8,
+                    border=ft.border.all(1, "#D1D5DB"),
                 ),
-            ])
+            ], spacing=10, scroll=ft.ScrollMode.AUTO),
+            padding=20,
         )
-
-    table_factures = ft.DataTable(
-        columns=[
-            ft.DataColumn(ft.Text("N° Facture")), ft.DataColumn(ft.Text("N° Devis")), ft.DataColumn(ft.Text("Type")),
-            ft.DataColumn(ft.Text("Date")), ft.DataColumn(ft.Text("Montant HT")), ft.DataColumn(ft.Text("Statut")),
-            ft.DataColumn(ft.Text("Imprimer")),
-        ],
-        rows=factures_rows, heading_row_color=THEME["sage_pale"], border=ft.border.all(1, THEME["sage_light"]), border_radius=8,
-    )
-
-    operations_tabs = ft.Tabs(
-        selected_index=0,
-        tabs=[
-            ft.Tab(text="📋 Devis Commerciaux Actifs", icon=ft.icons.DESCRIPTION_OUTLINED, content=ft.Container(content=table_devis, padding=16)),
-            ft.Tab(text="🧾 Factures Émises & Réimpression", icon=ft.icons.RECEIPT_LONG_OUTLINED, content=ft.Container(content=table_factures, padding=16)),
-        ],
-    )
-
-    return ft.ListView(
-        controls=[
-            create_header("🧭", "Tableau de bord ERP", f"Pilotage de la Micro-Entreprise — Exercice {current_year}"),
-            build_radar_vigilance(page),
-            ft.Container(height=14),
-            kpis_row,
-            ft.Container(height=14),
-            ft.Row([card_jauge_tva, card_jauge_micro], spacing=16),
-            ft.Container(height=14),
-            card_echeancier,
-            ft.Container(height=14),
-            create_card(operations_tabs, padding=10),
-            build_footer(),
-        ],
-        spacing=10,
-        expand=True,
-    )
 
 
 # --- MODULE GUIDE & LIVRET D'ACCUEIL ---
@@ -1357,7 +1485,7 @@ def view_livret_accueil(page: ft.Page):
 def view_kanban(page: ft.Page):
     conn = get_db()
     ent = get_entreprise_info()
-    taux_charges = ent["taux_urssaf"] + ent["taux_ir"]
+    taux_charges = ent.get("taux_urssaf", 21.2) + ent.get("taux_ir", 2.2)
 
     df_projets = pd.read_sql_query("SELECT * FROM projets ORDER BY id DESC", conn)
     df_devis_signes = pd.read_sql_query("SELECT numero_devis, client_societe, client_nom, client_prenom, montant_setup, sections_json FROM devis WHERE statut = 'Validé & Signé' AND contrat_signe = 1 AND archive = 0", conn)
@@ -1369,6 +1497,7 @@ def view_kanban(page: ft.Page):
         label="Devis signé & validé à convertir en projet :",
         options=[ft.dropdown.Option(key=r["numero_devis"], text=f"{r['numero_devis']} — {r['client_societe'] or r['client_nom']}") for _, r in df_devis_signes.iterrows()],
         width=420,
+        border_color="#CBD5E1",
     )
 
     def convert_devis(e):
@@ -1390,13 +1519,13 @@ def view_kanban(page: ft.Page):
         except Exception: pass
         conn.commit()
         conn.close()
-        show_toast(page, "Projet créé avec succès !")
+        show_toast(page, "Nouveau projet d'ingénierie initialisé avec succès !")
         page.go("/kanban")
 
     subview_container = ft.Container()
     current_tab = "kanban"
 
-    txt_new_task_title = ft.TextField(label="Titre de la tâche à ajouter *", expand=True)
+    txt_new_task_title = ft.TextField(label="Intitulé de la tâche à ajouter *", expand=True)
     dd_new_task_prio = ft.Dropdown(label="Priorité", options=[ft.dropdown.Option(p) for p in PRIORITES], value="Normale", width=140)
     txt_new_task_h = ft.TextField(label="Heures", value="2.0", width=90)
 
@@ -1431,7 +1560,7 @@ def view_kanban(page: ft.Page):
 
     def build_kanban_view():
         if not selected_proj_id:
-            return ft.Text("Aucun projet sélectionné. Utilisez la conversion de devis ci-dessus.", italic=True)
+            return ft.Text("Aucun projet sélectionné. Utilisez la conversion de devis ci-dessus.", italic=True, color="#64748B")
 
         conn = get_db()
         cursor = conn.cursor()
@@ -1440,23 +1569,38 @@ def view_kanban(page: ft.Page):
         conn.close()
 
         cols_ui = []
-        couleurs = {"À faire": "#FEFCBF", "En cours": "#BEE3F8", "En test": "#E9D8FD", "Terminé": "#C6F6D5"}
+        couleurs_pastilles = {
+            "À faire": "#94A3B8",
+            "En cours": "#2563EB",
+            "En test": "#7C3AED",
+            "Terminé": "#047857"
+        }
+
         for col_name in COLONNES_KANBAN:
             tasks_in_col = [t for t in taches if t[4] == col_name]
             task_cards = []
             for t in tasks_in_col:
                 tid, titre, prio, h_val = t[0], t[2], t[5], float(t[7])
+                
+                # Badges de priorité sobres
+                prio_bg = "#FEF2F2" if prio == "Urgente" else ("#FFFBEB" if prio == "Haute" else "#F1F5F9")
+                prio_color = "#B91C1C" if prio == "Urgente" else ("#B45309" if prio == "Haute" else "#475569")
+
                 task_cards.append(
                     ft.Container(
-                        bgcolor=ft.colors.WHITE, border=ft.border.all(1, "#E2E8F0"), border_radius=10, padding=12,
+                        bgcolor="#FFFFFF", border=ft.border.all(1, "#CBD5E1"), border_radius=8, padding=12,
+                        shadow=ft.BoxShadow(spread_radius=0, blur_radius=8, color="#08000000", offset=ft.Offset(0, 2)),
                         content=ft.Column([
-                            ft.Row([ft.Text(prio, size=10, weight=ft.FontWeight.BOLD), ft.IconButton(icon=ft.icons.DELETE_OUTLINE, icon_size=15, on_click=lambda e, i=tid: delete_tache(i))], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                            ft.Text(titre, size=12, weight=ft.FontWeight.BOLD),
                             ft.Row([
-                                ft.Text(f"⏱️ {h_val:.1f}h", size=11, color=THEME["text_muted"]),
+                                ft.Container(content=ft.Text(prio, size=9, weight=ft.FontWeight.BOLD, color=prio_color), bgcolor=prio_bg, border_radius=4, padding=ft.padding.symmetric(horizontal=6, vertical=2)),
+                                ft.IconButton(icon=ft.icons.DELETE_OUTLINE, icon_size=15, icon_color="#94A3B8", on_click=lambda e, i=tid: delete_tache(i)),
+                            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Text(titre, size=12.5, weight=ft.FontWeight.W_800, color="#090D16"),
+                            ft.Row([
+                                ft.Text(f"⏱️ {h_val:.1f}h", size=11, color="#64748B", weight=ft.FontWeight.W_600),
                                 ft.Row([
-                                    ft.IconButton(icon=ft.icons.ARROW_BACK, icon_size=16, on_click=lambda e, i=tid, c=col_name: move_t(i, c, -1), disabled=(col_name == "À faire")),
-                                    ft.IconButton(icon=ft.icons.ARROW_FORWARD, icon_size=16, on_click=lambda e, i=tid, c=col_name: move_t(i, c, 1), disabled=(col_name == "Terminé")),
+                                    ft.IconButton(icon=ft.icons.ARROW_BACK, icon_size=16, icon_color="#05231A", on_click=lambda e, i=tid, c=col_name: move_t(i, c, -1), disabled=(col_name == "À faire")),
+                                    ft.IconButton(icon=ft.icons.ARROW_FORWARD, icon_size=16, icon_color="#05231A", on_click=lambda e, i=tid, c=col_name: move_t(i, c, 1), disabled=(col_name == "Terminé")),
                                 ], spacing=0),
                             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                         ], spacing=4),
@@ -1465,10 +1609,13 @@ def view_kanban(page: ft.Page):
 
             cols_ui.append(
                 ft.Container(
-                    width=280, bgcolor=THEME["cream_card"], border=ft.border.all(1, THEME["sage_light"]), border_radius=12, padding=12,
+                    width=280, bgcolor="#F8FAFC", border=ft.border.all(1, "#CBD5E1"), border_radius=12, padding=12,
                     content=ft.Column([
-                        ft.Row([ft.Container(width=10, height=10, bgcolor=couleurs[col_name], border_radius=5), ft.Text(f"{col_name} ({len(tasks_in_col)})", weight=ft.FontWeight.BOLD, size=13)], spacing=8),
-                        ft.Divider(height=10, color=THEME["sage_light"]),
+                        ft.Row([
+                            ft.Container(width=8, height=8, bgcolor=couleurs_pastilles[col_name], border_radius=4),
+                            ft.Text(f"{col_name.upper()} ({len(tasks_in_col)})", weight=ft.FontWeight.W_900, size=11.5, color="#090D16"),
+                        ], spacing=8),
+                        ft.Divider(height=10, color="#CBD5E1"),
                         ft.Column(controls=task_cards, spacing=8),
                     ], spacing=6),
                 )
@@ -1476,7 +1623,7 @@ def view_kanban(page: ft.Page):
 
         return ft.Column([
             create_card(
-                ft.Row([txt_new_task_title, dd_new_task_prio, txt_new_task_h, ft.ElevatedButton("Ajouter la tâche", icon=ft.icons.ADD, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=add_task_quick)]),
+                ft.Row([txt_new_task_title, dd_new_task_prio, txt_new_task_h, ft.ElevatedButton("Ajouter la tâche", icon=ft.icons.ADD, bgcolor="#047857", color=ft.colors.WHITE, on_click=add_task_quick)]),
                 padding=12,
             ),
             ft.Container(height=15),
@@ -1502,16 +1649,16 @@ def view_kanban(page: ft.Page):
 
         return create_card(
             ft.Column([
-                ft.Text(f"📊 Analyse Financière du Projet : {p[3]}", size=16, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
-                ft.Divider(height=18),
+                ft.Text(f"AUDIT DE RENTABILITÉ FINANCIÈRE • {p[3].upper()}", size=14, weight=ft.FontWeight.W_900, color="#05231A"),
+                ft.Divider(height=18, color="#CBD5E1"),
                 ft.Row([
-                    ft.Column([ft.Text("BUDGET FACTURÉ HT", size=11, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{budget_ht:.2f} €", size=22, weight=ft.FontWeight.BOLD)]),
-                    ft.Column([ft.Text("HEURES INVESTIES", size=11, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{total_heures:.1f} heures", size=22, weight=ft.FontWeight.BOLD)]),
-                    ft.Column([ft.Text("RENDEMENT HORAIRE EFFECTIF", size=11, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{taux_horaire_reel:.2f} € / h", size=22, weight=ft.FontWeight.BOLD, color=ft.colors.BLUE_800)]),
-                    ft.Column([ft.Text("MARGE NETTE RÉELLE", size=11, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{marge_nette:.2f} € ({taux_marge:.1f} %)", size=22, weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800)]),
+                    ft.Column([ft.Text("BUDGET FACTURÉ HT", size=10, color="#64748B", weight=ft.FontWeight.BOLD), ft.Text(f"{budget_ht:,.2f} €", size=22, weight=ft.FontWeight.W_900, color="#090D16")]),
+                    ft.Column([ft.Text("HEURES CONSACRÉES", size=10, color="#64748B", weight=ft.FontWeight.BOLD), ft.Text(f"{total_heures:.1f} h", size=22, weight=ft.FontWeight.W_900, color="#090D16")]),
+                    ft.Column([ft.Text("RENDEMENT HORAIRE EFFECTIF", size=10, color="#64748B", weight=ft.FontWeight.BOLD), ft.Text(f"{taux_horaire_reel:,.2f} € / h", size=22, weight=ft.FontWeight.W_900, color="#047857")]),
+                    ft.Column([ft.Text("MARGE NETTE COMPTABLE", size=10, color="#64748B", weight=ft.FontWeight.BOLD), ft.Text(f"{marge_nette:,.2f} € ({taux_marge:.1f} %)", size=22, weight=ft.FontWeight.W_900, color="#047857")]),
                 ], alignment=ft.MainAxisAlignment.SPACE_AROUND),
-                ft.Divider(height=20),
-                ft.Text(f"💡 Déduction faite de {charges_euros:.2f} € provisionnés pour cotisations URSSAF et Impôt sur le Revenu ({taux_charges:.1f} %).", size=12, italic=True),
+                ft.Divider(height=18, color="#CBD5E1"),
+                ft.Text(f"💡 Déduction faite de {charges_euros:.2f} € provisionnés pour cotisations URSSAF et Impôt sur le Revenu ({taux_charges:.1f} %).", size=11, color="#64748B", italic=True),
             ], spacing=12),
             padding=24,
         )
@@ -1556,10 +1703,13 @@ def view_kanban(page: ft.Page):
     def build_scope_shield_view():
         return create_card(
             ft.Column([
-                ft.Text("🛡️ Scope-Shield — Bloquer le travail gratuit & Générer un Avenant Flash", size=15, weight=ft.FontWeight.BOLD),
-                ft.Text("Lorsqu'un client demande une modification hors cahier des charges, quantifiez immédiatement son impact contractuel :", size=12, color=THEME["text_muted"]),
+                ft.Row([
+                    ft.Icon(ft.icons.SHIELD_ROUNDED, color="#B45309", size=22),
+                    ft.Text("SCOPE-SHIELD • BOUCLIER CONTRACTUEL ANTI-TRAVAIL GRATUIT", size=14, weight=ft.FontWeight.W_900, color="#090D16"),
+                ], spacing=8),
+                ft.Text("Lorsqu'un client formule une demande hors cahier des charges, quantifiez immédiatement son impact juridique et financier :", size=12, color="#64748B"),
                 ft.Row([txt_avn_desc, txt_avn_prix, txt_avn_delai]),
-                ft.ElevatedButton("📄 Générer l'Avenant A4 Officiel (PDF)", icon=ft.icons.DESCRIPTION, bgcolor=THEME["blush_dark"], color=ft.colors.WHITE, height=45, on_click=trigger_scope_shield),
+                ft.ElevatedButton("Générer l'Avenant A4 Officiel (PDF)", icon=ft.icons.DESCRIPTION, bgcolor="#B45309", color=ft.colors.WHITE, height=45, on_click=trigger_scope_shield),
             ], spacing=14),
             padding=24,
         )
@@ -1593,12 +1743,15 @@ def view_kanban(page: ft.Page):
     def build_blueprint_view():
         return create_card(
             ft.Column([
-                ft.Text("🗺️ Architecture Blueprint — Rendre le flux visible et prestigieux", size=15, weight=ft.FontWeight.BOLD),
-                ft.Text("Éditez la fiche technique d'ingénierie à remettre au client avec le Procès-Verbal de Recette :", size=12, color=THEME["text_muted"]),
+                ft.Row([
+                    ft.Icon(ft.icons.MAP_ROUNDED, color="#05231A", size=22),
+                    ft.Text("ARCHITECTURE BLUEPRINT • SCHÉMA DIRECTEUR DE FLUX", size=14, weight=ft.FontWeight.W_900, color="#090D16"),
+                ], spacing=8),
+                ft.Text("Éditez la fiche technique d'ingénierie à remettre au client avec le Procès-Verbal de Recette :", size=12, color="#64748B"),
                 ft.Row([txt_bp_nom, txt_bp_trigger]),
                 txt_bp_etapes,
                 txt_bp_mapping,
-                ft.ElevatedButton("🖨️ Éditer le Blueprint Technique A4", icon=ft.icons.PRINT, bgcolor=THEME["sage"], color=ft.colors.WHITE, height=45, on_click=print_blueprint),
+                ft.ElevatedButton("Éditer le Blueprint Technique A4", icon=ft.icons.PRINT, bgcolor="#05231A", color=ft.colors.WHITE, height=45, on_click=print_blueprint),
             ], spacing=14),
             padding=24,
         )
@@ -1613,14 +1766,10 @@ def view_kanban(page: ft.Page):
     def set_active_tab(tab_name):
         nonlocal current_tab
         current_tab = tab_name
-        btn_tab_k.bgcolor = THEME["sage"] if tab_name == "kanban" else ft.colors.TRANSPARENT
-        btn_tab_k.color = ft.colors.WHITE if tab_name == "kanban" else THEME["text"]
-        btn_tab_f.bgcolor = THEME["sage"] if tab_name == "finance" else ft.colors.TRANSPARENT
-        btn_tab_f.color = ft.colors.WHITE if tab_name == "finance" else THEME["text"]
-        btn_tab_s.bgcolor = THEME["sage"] if tab_name == "scope" else ft.colors.TRANSPARENT
-        btn_tab_s.color = ft.colors.WHITE if tab_name == "scope" else THEME["text"]
-        btn_tab_b.bgcolor = THEME["sage"] if tab_name == "blueprint" else ft.colors.TRANSPARENT
-        btn_tab_b.color = ft.colors.WHITE if tab_name == "blueprint" else THEME["text"]
+        for t, btn in [("kanban", btn_tab_k), ("finance", btn_tab_f), ("scope", btn_tab_s), ("blueprint", btn_tab_b)]:
+            is_active = (tab_name == t)
+            btn.bgcolor = "#05231A" if is_active else ft.colors.TRANSPARENT
+            btn.color = ft.colors.WHITE if is_active else "#475569"
         refresh_current_view()
 
     btn_tab_k = ft.ElevatedButton("📌 Tableau Kanban", icon=ft.icons.VIEW_KANBAN_ROUNDED, on_click=lambda e: set_active_tab("kanban"))
@@ -1629,10 +1778,11 @@ def view_kanban(page: ft.Page):
     btn_tab_b = ft.ElevatedButton("🗺️ Blueprint Technique", icon=ft.icons.MAP_ROUNDED, on_click=lambda e: set_active_tab("blueprint"))
 
     dd_select_proj = ft.Dropdown(
-        label="Sélectionner le projet actif :",
+        label="Projet actif en cours de production :",
         options=[ft.dropdown.Option(key=str(r["id"]), text=f"{r['nom_projet']} ({float(r['budget_ht']):.2f} € HT)") for _, r in df_projets.iterrows()],
         value=str(selected_proj_id) if selected_proj_id else None,
         width=380,
+        border_color="#CBD5E1",
     )
 
     def on_proj_select(e):
@@ -1644,18 +1794,23 @@ def view_kanban(page: ft.Page):
     dd_select_proj.on_change = on_proj_select
     set_active_tab("kanban")
 
+    segmented_bar = ft.Container(
+        content=ft.Row([btn_tab_k, btn_tab_f, btn_tab_s, btn_tab_b], spacing=8),
+        padding=ft.padding.symmetric(vertical=4),
+    )
+
     return ft.ListView(
         controls=[
-            create_header("🚀", "Projets, Kanban & Livrables Techniques", "Espace de production épuré et modulaire"),
+            create_header("PRD.01", "PRODUCTION, KANBAN & LIVRABLES TECHNIQUES", "ESPACE DE FABRICATION • PILOTAGE DU RENDEMENT HORAIRE & DES LIVRABLES"),
             create_card(
                 ft.Row([
                     dd_select_proj,
-                    ft.Row([dd_devis_to_convert, ft.ElevatedButton("Convertir Devis", icon=ft.icons.ROCKET_LAUNCH, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=convert_devis)]),
+                    ft.Row([dd_devis_to_convert, ft.ElevatedButton("Convertir Devis", icon=ft.icons.ROCKET_LAUNCH, bgcolor="#047857", color=ft.colors.WHITE, on_click=convert_devis)]),
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 padding=16,
             ),
-            ft.Container(height=14),
-            ft.Row([btn_tab_k, btn_tab_f, btn_tab_s, btn_tab_b], spacing=12),
+            ft.Container(height=12),
+            segmented_bar,
             ft.Container(height=16),
             subview_container,
             build_footer(),
@@ -1675,14 +1830,14 @@ def view_crm_clients(page: ft.Page):
     ent = get_entreprise_info()
     conn.close()
 
-    txt_societe = ft.TextField(label="Nom de la Société", expand=True)
+    txt_societe = ft.TextField(label="Raison Sociale / Société", expand=True)
     txt_nom = ft.TextField(label="Nom du contact *", width=250)
     txt_prenom = ft.TextField(label="Prénom *", width=250)
-    txt_adresse = ft.TextField(label="Adresse complète *", multiline=True, min_lines=2)
-    txt_tel = ft.TextField(label="Téléphone", width=250)
-    txt_email = ft.TextField(label="Email", width=250)
+    txt_adresse = ft.TextField(label="Adresse postale complète *", multiline=True, min_lines=2)
+    txt_tel = ft.TextField(label="Téléphone professionnel", width=250)
+    txt_email = ft.TextField(label="Email de contact *", width=250)
 
-    txt_recherche = ft.TextField(label="🔍 Rechercher dans le portefeuille (Nom, Société, Email)", expand=True, border_color=THEME["sage_light"])
+    txt_recherche = ft.TextField(label="🔍 Rechercher dans le portefeuille (Société, Contact, Email)", expand=True, border_color="#CBD5E1")
     portefeuille_table_container = ft.Container()
 
     def get_client_stats(cid, c_nom_complet, c_soc):
@@ -1759,99 +1914,179 @@ def view_crm_clients(page: ft.Page):
         for p in projets_list:
             travaux_cards.append(
                 ft.Container(
-                    bgcolor=THEME["sage_pale"], border_radius=8, padding=10,
+                    bgcolor="#F8FAFC", border=ft.border.all(1, "#E2E8F0"), border_radius=8, padding=12,
                     content=ft.Row([
                         ft.Column([
-                            ft.Text(p["nom_projet"], weight=ft.FontWeight.BOLD, size=13),
-                            ft.Text(f"Date début : {p['date_debut']} | Livraison : {p['date_livraison_prevue'] or '-'}", size=11, color=THEME["text_muted"]),
+                            ft.Text(p["nom_projet"], weight=ft.FontWeight.BOLD, size=13, color="#090D16"),
+                            ft.Text(f"Date début : {p['date_debut']} | Livraison : {p['date_livraison_prevue'] or '-'}", size=11, color="#64748B"),
                         ]),
-                        ft.Text(f"{float(p['budget_ht']):.2f} € HT", weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
+                        ft.Text(f"{float(p['budget_ht']):.2f} € HT", weight=ft.FontWeight.W_900, color="#047857"),
                     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
                 )
             )
 
         tab_travaux = ft.ListView([
-            ft.Text(f"Projets en production & Devis ({len(projets_list)} projet(s), {len(devis_list)} devis)", weight=ft.FontWeight.BOLD, size=13),
-            ft.Column(travaux_cards if travaux_cards else [ft.Text("Aucun projet enregistré.", italic=True)]),
-        ], spacing=8, expand=True)
+            ft.Text(f"Projets en cours & Devis rattachés ({len(projets_list)} projet(s), {len(devis_list)} devis)", weight=ft.FontWeight.BOLD, size=13, color="#090D16"),
+            ft.Column(travaux_cards if travaux_cards else [ft.Text("Aucun projet enregistré pour ce compte.", italic=True, color="#64748B")]),
+        ], spacing=10, expand=True)
 
         mco_rows = [
             ft.DataRow(cells=[
                 ft.DataCell(ft.Text(m["mois"], weight=ft.FontWeight.BOLD)),
-                ft.DataCell(ft.Text(f"{m['flux_surveilles']} flux")),
+                ft.DataCell(ft.Text(f"{m['flux_surveilles']} passerelles")),
                 ft.DataCell(ft.Text(f"{m['operations_traitees']} ops")),
-                ft.DataCell(ft.Text(m["statut_sante"], color=ft.colors.GREEN_800)),
+                ft.DataCell(ft.Text(m["statut_sante"], color="#047857", weight=ft.FontWeight.BOLD)),
             ])
             for m in mco_list
         ]
         tab_abos = ft.ListView([
-            ft.Text("Supervision & Maintien Opérationnel (MCO)", weight=ft.FontWeight.BOLD, size=13),
+            ft.Text("Supervision & Maintien en Condition Opérationnelle (MCO)", weight=ft.FontWeight.BOLD, size=13, color="#090D16"),
             ft.DataTable(
-                columns=[ft.DataColumn(ft.Text("Mois")), ft.DataColumn(ft.Text("Passerelles")), ft.DataColumn(ft.Text("Opérations")), ft.DataColumn(ft.Text("Santé"))],
-                rows=mco_rows, heading_row_color=THEME["sage_pale"], border=ft.border.all(1, THEME["sage_light"]), border_radius=8,
-            ) if mco_rows else ft.Text("Aucun historique de maintenance saisi.", italic=True),
-        ], spacing=8, expand=True)
+                columns=[ft.DataColumn(ft.Text("Période")), ft.DataColumn(ft.Text("Connecteurs")), ft.DataColumn(ft.Text("Opérations")), ft.DataColumn(ft.Text("Disponibilité"))],
+                rows=mco_rows, heading_row_color="#F8FAFC", border=ft.border.all(1, "#CBD5E1"), border_radius=8,
+            ) if mco_rows else ft.Text("Aucun rapport de maintenance récurrente pour ce client.", italic=True, color="#64748B"),
+        ], spacing=10, expand=True)
 
         tot_facture = sum(float(f["montant_ht"]) for f in factures_list)
         tot_regle = sum(float(f["montant_ht"]) for f in factures_list if f["statut"] in ["Facture Acquittée", "Payée"])
+        reste_a_payer = tot_facture - tot_regle
+
         tab_factures = ft.ListView([
-            ft.Row([
-                ft.Text(f"Facturé : {tot_facture:.2f} € HT", weight=ft.FontWeight.BOLD),
-                ft.Text(f"Encaissé : {tot_regle:.2f} € HT", weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800),
-                ft.Text(f"Reste Dû : {(tot_facture - tot_regle):.2f} € HT", weight=ft.FontWeight.BOLD, color=ft.colors.RED_800 if (tot_facture - tot_regle) > 0 else THEME["sage_dark"]),
-            ], spacing=16),
+            ft.Container(
+                content=ft.Row([
+                    ft.Column([ft.Text("TOTAL FACTURÉ HT", size=10, weight=ft.FontWeight.BOLD, color="#64748B"), ft.Text(f"{tot_facture:.2f} €", size=18, weight=ft.FontWeight.BOLD)]),
+                    ft.Column([ft.Text("TOTAL ENCAISSÉ", size=10, weight=ft.FontWeight.BOLD, color="#64748B"), ft.Text(f"{tot_regle:.2f} €", size=18, weight=ft.FontWeight.BOLD, color="#047857")]),
+                    ft.Column([ft.Text("RESTE DÛ", size=10, weight=ft.FontWeight.BOLD, color="#64748B"), ft.Text(f"{reste_a_payer:.2f} €", size=18, weight=ft.FontWeight.BOLD, color="#B91C1C" if reste_a_payer > 0 else "#047857")]),
+                ], alignment=ft.MainAxisAlignment.SPACE_AROUND),
+                bgcolor="#F8FAFC", border=ft.border.all(1, "#E2E8F0"), border_radius=8, padding=12,
+            ),
             ft.DataTable(
-                columns=[ft.DataColumn(ft.Text("Facture")), ft.DataColumn(ft.Text("Date")), ft.DataColumn(ft.Text("Montant HT")), ft.DataColumn(ft.Text("Statut"))],
+                columns=[ft.DataColumn(ft.Text("N° Facture")), ft.DataColumn(ft.Text("Date")), ft.DataColumn(ft.Text("Montant HT")), ft.DataColumn(ft.Text("État"))],
                 rows=[
                     ft.DataRow(cells=[
                         ft.DataCell(ft.Text(f["numero_facture"], weight=ft.FontWeight.BOLD, size=11)),
                         ft.DataCell(ft.Text(f["date_facture"], size=11)),
                         ft.DataCell(ft.Text(f"{float(f['montant_ht']):.2f} €", size=11)),
-                        ft.DataCell(ft.Text(f["statut"], size=11, color=ft.colors.GREEN_800 if f["statut"] in ["Facture Acquittée", "Payée"] else ft.colors.ORANGE_800)),
+                        ft.DataCell(ft.Text(f["statut"], size=11, color="#047857" if f["statut"] in ["Facture Acquittée", "Payée"] else "#B45309", weight=ft.FontWeight.BOLD)),
                     ]) for f in factures_list
                 ],
-                heading_row_color=THEME["sage_pale"], border=ft.border.all(1, THEME["sage_light"]), border_radius=8,
-            ) if factures_list else ft.Text("Aucune facture émise.", italic=True),
-        ], spacing=8, expand=True)
+                heading_row_color="#F8FAFC", border=ft.border.all(1, "#CBD5E1"), border_radius=8,
+            ) if factures_list else ft.Text("Aucune facture émise pour ce compte.", italic=True, color="#64748B"),
+        ], spacing=12, expand=True)
 
+        # Champs du formulaire d'ajout direct dans le Coffre-Fort
+        txt_modal_service = ft.TextField(label="Plateforme (ex: Stripe, Make, OpenAI)", width=240, border_color="#CBD5E1")
+        txt_modal_type = ft.TextField(label="Type (ex: Clé API Secrète, Webhook)", width=220, border_color="#CBD5E1")
+        txt_modal_cle = ft.TextField(label="Valeur Secrète / Token", expand=True, password=True, can_reveal_password=True, border_color="#CBD5E1")
+
+        def add_secret_in_modal(e):
+            if not txt_modal_service.value.strip() or not txt_modal_cle.value.strip():
+                show_toast(page, "Veuillez préciser la plateforme et la clé secrète.", is_error=True)
+                return
+            conn_sec = get_db()
+            conn_sec.cursor().execute(
+                "INSERT INTO secrets_vault (client_id, service_nom, type_identifiant, valeur_cle, statut, date_ajout) VALUES (?, ?, ?, ?, 'Actif chez prestataire', ?)",
+                (cid, txt_modal_service.value.strip(), txt_modal_type.value.strip() or "Clé API", txt_modal_cle.value.strip(), str(datetime.date.today()))
+            )
+            conn_sec.commit()
+            conn_sec.close()
+            show_toast(page, f"Clé {txt_modal_service.value} sécurisée dans le coffre-fort !")
+            close_dialog(dlg_360)
+            open_client_360_modal(cid)
+
+        def delete_secret_in_modal(sid):
+            conn_del = get_db()
+            conn_del.cursor().execute("DELETE FROM secrets_vault WHERE id = ?", (sid,))
+            conn_del.commit()
+            conn_del.close()
+            show_toast(page, "Clé supprimée du coffre-fort.")
+            close_dialog(dlg_360)
+            open_client_360_modal(cid)
+
+        # Onglet 4 : Coffre-Fort complet avec Formulaire d'Ajout
         tab_secrets = ft.ListView([
             ft.Row([
-                ft.Text("Accès techniques & Habilitations", weight=ft.FontWeight.BOLD, size=13),
-                ft.ElevatedButton("📄 Imprimer Décharge RGPD (PDF)", icon=ft.icons.SECURITY_ROUNDED, bgcolor=THEME["blush_dark"], color=ft.colors.WHITE, on_click=lambda e: print_decharge_rgpd(cid)),
+                ft.Text("Coffre-fort & Accès API chiffrés", weight=ft.FontWeight.BOLD, size=13, color="#090D16"),
+                ft.ElevatedButton("📄 Décharge de Sécurité (PDF)", icon=ft.icons.SECURITY_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, on_click=lambda e: print_decharge_rgpd(cid)),
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            ft.Divider(height=10, color="#E2E8F0"),
+            
+            # Formulaire d'ajout direct
+            ft.Container(
+                content=ft.Column([
+                    ft.Text("➕ Ajouter un nouvel accès pour ce client :", size=11.5, weight=ft.FontWeight.W_800, color="#047857"),
+                    ft.Row([txt_modal_service, txt_modal_type]),
+                    ft.Row([
+                        txt_modal_cle,
+                        ft.ElevatedButton("Enregistrer la clé", icon=ft.icons.LOCK_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=48, on_click=add_secret_in_modal),
+                    ]),
+                ], spacing=8),
+                bgcolor="#F8FAFC",
+                border=ft.border.all(1, "#CBD5E1"),
+                border_radius=8,
+                padding=12,
+            ),
+            ft.Divider(height=14, color="#E2E8F0"),
+            ft.Text("Clés actives chez le prestataire :", size=11, weight=ft.FontWeight.BOLD, color="#475569"),
             ft.DataTable(
-                columns=[ft.DataColumn(ft.Text("Plateforme")), ft.DataColumn(ft.Text("Type")), ft.DataColumn(ft.Text("Statut"))],
+                columns=[
+                    ft.DataColumn(ft.Text("Service / Plateforme")), 
+                    ft.DataColumn(ft.Text("Type")), 
+                    ft.DataColumn(ft.Text("Clé")), 
+                    ft.DataColumn(ft.Text("Statut")),
+                    ft.DataColumn(ft.Text("Action")),
+                ],
                 rows=[
                     ft.DataRow(cells=[
                         ft.DataCell(ft.Text(s["service_nom"], weight=ft.FontWeight.BOLD)),
                         ft.DataCell(ft.Text(s["type_identifiant"])),
-                        ft.DataCell(ft.Text(s["statut"], color=ft.colors.GREEN_800)),
+                        ft.DataCell(ft.Text("••••••••••••••")),
+                        ft.DataCell(ft.Text(s["statut"], color="#047857", weight=ft.FontWeight.BOLD)),
+                        ft.DataCell(ft.IconButton(icon=ft.icons.DELETE_OUTLINE, icon_size=16, icon_color="#B91C1C", on_click=lambda e, sid=s["id"]: delete_secret_in_modal(sid))),
                     ]) for s in secrets_list
                 ],
-                heading_row_color=THEME["sage_pale"], border=ft.border.all(1, THEME["sage_light"]), border_radius=8,
-            ) if secrets_list else ft.Text("Aucun secret technique enregistré.", italic=True),
-        ], spacing=8, expand=True)
+                heading_row_color="#F8FAFC", border=ft.border.all(1, "#CBD5E1"), border_radius=8,
+            ) if secrets_list else ft.Text("Aucun secret technique enregistré pour ce compte.", italic=True, color="#64748B"),
+        ], spacing=10, expand=True)
 
         detail_tabs = ft.Tabs(
             selected_index=0,
             tabs=[
-                ft.Tab(text="🛠️ Travaux", content=ft.Container(tab_travaux, padding=10)),
-                ft.Tab(text="🩺 Abonnements", content=ft.Container(tab_abos, padding=10)),
-                ft.Tab(text="🧾 Facturation", content=ft.Container(tab_factures, padding=10)),
-                ft.Tab(text="🔐 Sécurité", content=ft.Container(tab_secrets, padding=10)),
+                ft.Tab(text="Travaux & Projets", icon=ft.icons.ROCKET_LAUNCH_OUTLINED, content=ft.Container(tab_travaux, padding=12)),
+                ft.Tab(text="Abonnements & MCO", icon=ft.icons.HEALTH_AND_SAFETY_OUTLINED, content=ft.Container(tab_abos, padding=12)),
+                ft.Tab(text="Facturation & Règlements", icon=ft.icons.RECEIPT_LONG_OUTLINED, content=ft.Container(tab_factures, padding=12)),
+                ft.Tab(text="Coffre-Fort API", icon=ft.icons.LOCK_OUTLINED, content=ft.Container(tab_secrets, padding=12)),
             ],
             expand=True,
         )
 
         nom_display = client["societe"] or f"{client['prenom']} {client['nom']}"
 
+        b64_logo = get_app_logo_base64()
+        logo_widget_modal = (
+            ft.Image(src_base64=b64_logo, width=28, height=28, fit=ft.ImageFit.CONTAIN, border_radius=4)
+            if b64_logo
+            else ft.Icon(ft.icons.BALANCE_ROUNDED, color="#A7F3D0", size=24)
+        )
+
         dlg_360 = ft.AlertDialog(
             title=ft.Row([
-                ft.Container(content=ft.Text("360°", size=11, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE), bgcolor=THEME["sage_dark"], border_radius=6, padding=ft.padding.symmetric(horizontal=8, vertical=4)),
-                ft.Text(f"Fiche Client : {nom_display}", size=18, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
-            ], spacing=10),
-            content=ft.Container(content=detail_tabs, width=820, height=480),
-            actions=[ft.TextButton("Fermer", on_click=lambda e: close_dialog(dlg_360))],
+                ft.Container(
+                    content=logo_widget_modal,
+                    bgcolor="#0B382A",
+                    border_radius=6,
+                    padding=6,
+                    width=42,
+                    height=42,
+                    alignment=ft.alignment.center,
+                ),
+                ft.Column([
+                    ft.Text(f"DOSSIER 360° • {nom_display.upper()}", size=16, weight=ft.FontWeight.W_900, color="#FFFFFF"),
+                    ft.Text(f"CONTACT : {client['prenom']} {client['nom']} | EMAIL : {client['email'] or 'Non renseigné'}", size=10, color="#A7F3D0"),
+                ], spacing=2),
+            ], spacing=14),
+            content=ft.Container(content=detail_tabs, width=860, height=520),
+            actions=[ft.TextButton("Fermer le dossier", on_click=lambda e: close_dialog(dlg_360))],
             actions_alignment=ft.MainAxisAlignment.END,
         )
 
@@ -1905,15 +2140,15 @@ def view_crm_clients(page: ft.Page):
             stats = get_client_stats(cid, c_nom, c_soc)
 
             abo_badge = ft.Container(
-                content=ft.Text(f"{stats['abo_mensuel']:.2f} €/m" if stats['abo_mensuel'] > 0 else "Aucun", size=11, weight=ft.FontWeight.BOLD, color=ft.colors.PURPLE_900 if stats['abo_mensuel'] > 0 else THEME["text_muted"]),
-                bgcolor="#FAF5FF" if stats['abo_mensuel'] > 0 else THEME["sage_pale"],
+                content=ft.Text(f"{stats['abo_mensuel']:.2f} €/m" if stats['abo_mensuel'] > 0 else "Aucun", size=10, weight=ft.FontWeight.BOLD, color="#047857" if stats['abo_mensuel'] > 0 else "#64748B"),
+                bgcolor="#ECFDF5" if stats['abo_mensuel'] > 0 else "#F1F5F9",
                 padding=ft.padding.symmetric(horizontal=8, vertical=4),
                 border_radius=6,
             )
 
             status_badge = ft.Container(
-                content=ft.Text("À jour ✅" if not stats["has_retards"] else "Impayé ⚠️", size=11, weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800 if not stats["has_retards"] else ft.colors.RED_800),
-                bgcolor=ft.colors.GREEN_50 if not stats["has_retards"] else ft.colors.RED_50,
+                content=ft.Text("À jour ✅" if not stats["has_retards"] else "Impayé ⚠️", size=10, weight=ft.FontWeight.BOLD, color="#047857" if not stats["has_retards"] else "#B91C1C"),
+                bgcolor="#ECFDF5" if not stats["has_retards"] else "#FEF2F2",
                 padding=ft.padding.symmetric(horizontal=8, vertical=4),
                 border_radius=6,
             )
@@ -1921,18 +2156,18 @@ def view_crm_clients(page: ft.Page):
             rows.append(
                 ft.DataRow(
                     cells=[
-                        ft.DataCell(ft.Text(c_soc or "Particulier", weight=ft.FontWeight.BOLD)),
-                        ft.DataCell(ft.Text(c_nom)),
+                        ft.DataCell(ft.Text(c_soc or "Particulier", weight=ft.FontWeight.W_800, color="#090D16")),
+                        ft.DataCell(ft.Text(c_nom, color="#475569")),
                         ft.DataCell(abo_badge),
-                        ft.DataCell(ft.Text(f"{stats['ltv']:.2f} €", weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800)),
-                        ft.DataCell(ft.Text(f"{stats['nb_projets']} projet(s)")),
+                        ft.DataCell(ft.Text(f"{stats['ltv']:,.2f} €", weight=ft.FontWeight.W_900, color="#047857")),
+                        ft.DataCell(ft.Text(f"{stats['nb_projets']} projet(s)", color="#475569")),
                         ft.DataCell(status_badge),
                         ft.DataCell(
                             ft.ElevatedButton(
-                                "Inspecter 360°",
+                                "Fiche 360°",
                                 icon=ft.icons.INFO_OUTLINED,
-                                height=32,
-                                bgcolor=THEME["sage"],
+                                height=30,
+                                bgcolor="#05231A",
                                 color=ft.colors.WHITE,
                                 on_click=lambda e, i=cid: open_client_360_modal(i),
                             )
@@ -1943,17 +2178,17 @@ def view_crm_clients(page: ft.Page):
 
         portefeuille_table_container.content = ft.DataTable(
             columns=[
-                ft.DataColumn(ft.Text("Société")),
-                ft.DataColumn(ft.Text("Contact Principal")),
-                ft.DataColumn(ft.Text("Abonnement Actif")),
-                ft.DataColumn(ft.Text("Total Encaissé (LTV)")),
-                ft.DataColumn(ft.Text("Projets")),
-                ft.DataColumn(ft.Text("Comptabilité")),
-                ft.DataColumn(ft.Text("Fiche 360° (Popup)")),
+                ft.DataColumn(ft.Text("Compte Client / Société", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Contact Principal", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Abonnement Mensuel", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("CA Encaissé (LTV)", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Production", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("État Comptable", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Action", weight=ft.FontWeight.BOLD)),
             ],
             rows=rows,
-            heading_row_color=THEME["sage_pale"],
-            border=ft.border.all(1, THEME["sage_light"]),
+            heading_row_color="#F8FAFC",
+            border=ft.border.all(1, "#CBD5E1"),
             border_radius=8,
         )
         page.update()
@@ -1969,14 +2204,14 @@ def view_crm_clients(page: ft.Page):
         )
         conn.commit()
         conn.close()
-        show_toast(page, "Nouveau client enregistré !")
+        show_toast(page, "Nouveau compte client enregistré !")
         page.go("/crm")
 
     refresh_portefeuille()
 
     return ft.ListView(
         controls=[
-            create_header("👥", "Portefeuille Clients & Fiches 360°", "Vue unifiée des travaux réalisés, abonnements actifs et santé comptable"),
+            create_header("CRM.01", "PORTEFEUILLE CLIENTS & FICHES 360°", "GESTION DE PRÉCISION • RELATIONS & VALEUR VIE (LTV)"),
             create_card(
                 ft.Column([
                     ft.Row([txt_recherche], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
@@ -1986,15 +2221,20 @@ def view_crm_clients(page: ft.Page):
             ),
             ft.Container(height=16),
             ft.ExpansionTile(
-                leading=ft.Icon(ft.icons.PERSON_ADD_ALT_1_ROUNDED, color=THEME["sage_dark"]),
-                title=ft.Text("➕ Ajouter un nouveau client au portefeuille", size=14, weight=ft.FontWeight.BOLD),
+                leading=ft.Container(
+                    content=ft.Icon(ft.icons.PERSON_ADD_ALT_1_ROUNDED, color="#05231A", size=18),
+                    bgcolor="#F1F5F9",
+                    padding=6,
+                    border_radius=6,
+                ),
+                title=ft.Text("Ajouter un nouveau compte au portefeuille", size=13.5, weight=ft.FontWeight.W_800, color="#090D16"),
                 controls=[
                     ft.Container(
                         content=ft.Column([
                             ft.Row([txt_societe, txt_nom, txt_prenom]),
                             txt_adresse,
                             ft.Row([txt_tel, txt_email]),
-                            ft.ElevatedButton("Enregistrer le client", icon=ft.icons.SAVE_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=save_new_client),
+                            ft.ElevatedButton("Enregistrer le client", icon=ft.icons.SAVE_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=44, on_click=save_new_client),
                         ], spacing=12),
                         padding=16,
                     )
@@ -2307,20 +2547,32 @@ def view_mco_cockpit(page: ft.Page):
     selected_c_id = int(df_clients.iloc[0]["id"]) if not df_clients.empty else None
 
     current_month_str = datetime.date.today().strftime("%Y-%m")
-    txt_mco_mois = ft.TextField(label="Mois audité (AAAA-MM)", value=current_month_str, width=180)
-    txt_mco_flux = ft.TextField(label="Nombre de passerelles surveillées", value="3", width=220)
-    txt_mco_ops = ft.TextField(label="Opérations / requêtes traitées", value="4120", width=220)
-    txt_mco_incidents = ft.TextField(label="Incidents préventifs neutralisés", value="2", width=220)
+    txt_mco_mois = ft.TextField(label="Mois audité (AAAA-MM)", value=current_month_str, width=180, border_color="#CBD5E1")
+    txt_mco_flux = ft.TextField(label="Passerelles surveillées", value="3", width=200, border_color="#CBD5E1")
+    txt_mco_ops = ft.TextField(label="Opérations / requêtes traitées", value="4120", width=220, border_color="#CBD5E1")
+    txt_mco_incidents = ft.TextField(label="Incidents neutralisés", value="2", width=200, border_color="#CBD5E1")
     dd_mco_sante = ft.Dropdown(
-        label="Disponibilité / Santé",
-        options=[ft.dropdown.Option("100% Opérationnel"), ft.dropdown.Option("99.8% Nominal"), ft.dropdown.Option("En maintenance planifiée")],
+        label="Disponibilité & Santé",
+        options=[
+            ft.dropdown.Option("100% Opérationnel"),
+            ft.dropdown.Option("99.8% Nominal"),
+            ft.dropdown.Option("En maintenance planifiée"),
+        ],
         value="100% Opérationnel",
         width=250,
+        border_color="#CBD5E1",
     )
-    txt_mco_notes = ft.TextField(label="Commentaire d'exploitation pour le client", value="Surveillance continue sans anomalie. Quotas consommés à 41%.", expand=True)
+    txt_mco_notes = ft.TextField(
+        label="Commentaire d'exploitation pour le client",
+        value="Surveillance continue sans anomalie critique. Quotas de passerelles consommés à 41%.",
+        expand=True,
+        border_color="#CBD5E1",
+    )
 
     def add_telemetry(e):
-        if not selected_c_id: return
+        if not selected_c_id:
+            show_toast(page, "Veuillez sélectionner un client sous contrat MCO.", is_error=True)
+            return
         conn = get_db()
         conn.cursor().execute(
             """
@@ -2352,28 +2604,59 @@ def view_mco_cockpit(page: ft.Page):
         webbrowser.open(f"file://{temp_path}")
         show_toast(page, "Rapport Mensuel de Supervision généré.")
 
-    mco_rows = [
-        ft.DataRow(cells=[
-            ft.DataCell(ft.Text(r["mois"], weight=ft.FontWeight.BOLD)),
-            ft.DataCell(ft.Text(r["societe"] or f"{r['prenom']} {r['nom']}")),
-            ft.DataCell(ft.Text(f"{r['flux_surveilles']} flux")),
-            ft.DataCell(ft.Text(f"{r['operations_traitees']} ops")),
-            ft.DataCell(ft.Text(f"{r['incidents_resolus']} résolus", color=ft.colors.GREEN_800)),
-            ft.DataCell(ft.ElevatedButton("🖨️ Rapport PDF", icon=ft.icons.PRINT_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=lambda e, i=r["id"]: print_rapport_mco(i))),
-        ])
-        for _, r in df_mco.iterrows()
-    ]
+    mco_rows = []
+    for _, r in df_mco.iterrows():
+        is_parfait = ("100%" in str(r["statut_sante"]))
+        badge_sante = ft.Container(
+            content=ft.Text(r["statut_sante"], size=10, weight=ft.FontWeight.BOLD, color="#047857" if is_parfait else "#B45309"),
+            bgcolor="#ECFDF5" if is_parfait else "#FEF3C7",
+            padding=ft.padding.symmetric(horizontal=8, vertical=4),
+            border_radius=6,
+        )
+
+        mco_rows.append(
+            ft.DataRow(cells=[
+                ft.DataCell(ft.Text(r["mois"], weight=ft.FontWeight.BOLD, color="#090D16")),
+                ft.DataCell(ft.Text(r["societe"] or f"{r['prenom']} {r['nom']}", color="#475569")),
+                ft.DataCell(ft.Text(f"{r['flux_surveilles']} passerelles")),
+                ft.DataCell(ft.Text(f"{r['operations_traitees']:,} ops".replace(",", " "))),
+                ft.DataCell(ft.Text(f"{r['incidents_resolus']} résolu(s)", color="#047857", weight=ft.FontWeight.BOLD)),
+                ft.DataCell(badge_sante),
+                ft.DataCell(
+                    ft.ElevatedButton(
+                        "Rapport PDF",
+                        icon=ft.icons.PRINT_ROUNDED,
+                        bgcolor="#05231A",
+                        color=ft.colors.WHITE,
+                        height=30,
+                        on_click=lambda e, i=r["id"]: print_rapport_mco(i),
+                    )
+                ),
+            ])
+        )
 
     table_mco = ft.DataTable(
-        columns=[ft.DataColumn(ft.Text("Mois")), ft.DataColumn(ft.Text("Client Abonné")), ft.DataColumn(ft.Text("Flux")), ft.DataColumn(ft.Text("Requêtes")), ft.DataColumn(ft.Text("Incidents")), ft.DataColumn(ft.Text("Action"))],
-        rows=mco_rows, heading_row_color=THEME["sage_pale"], border=ft.border.all(1, THEME["sage_light"]), border_radius=8,
+        columns=[
+            ft.DataColumn(ft.Text("Période", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Client Abonné", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Connecteurs", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Requêtes Traitées", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Incidents Neutralisés", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Santé Globale", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Livrable", weight=ft.FontWeight.BOLD)),
+        ],
+        rows=mco_rows,
+        heading_row_color="#F8FAFC",
+        border=ft.border.all(1, "#CBD5E1"),
+        border_radius=8,
     )
 
     dd_select_c_mco = ft.Dropdown(
-        label="Client sous contrat de maintenance :",
+        label="Client sous contrat de maintenance MCO :",
         options=[ft.dropdown.Option(key=str(r["id"]), text=f"{r['societe'] or r['nom']}") for _, r in df_clients.iterrows()],
         value=str(selected_c_id) if selected_c_id else None,
-        width=350,
+        width=380,
+        border_color="#CBD5E1",
     )
 
     def on_c_mco_change(e):
@@ -2384,18 +2667,19 @@ def view_mco_cockpit(page: ft.Page):
 
     return ft.ListView(
         controls=[
-            create_header("🩺", "Cockpit MCO & Supervision des Abonnés", "Suivi opérationnel et justification tangible de vos abonnements récurrents"),
+            create_header("PRD.02", "COCKPIT MCO & SUPERVISION DES ABONNÉS", "PILOTAGE OPÉRATIONNEL • TÉLÉMÉTRIE & JUSTIFICATION DES ABONNEMENTS"),
             create_card(
                 ft.Column([
-                    ft.Text("Enregistrer les métriques mensuelles pour un client souscrit :", weight=ft.FontWeight.BOLD, size=14),
+                    ft.Text("Consigner les métriques mensuelles pour un compte abonné :", weight=ft.FontWeight.W_800, size=13.5, color="#090D16"),
                     ft.Row([dd_select_c_mco, txt_mco_mois, dd_mco_sante]),
                     ft.Row([txt_mco_flux, txt_mco_ops, txt_mco_incidents]),
                     txt_mco_notes,
-                    ft.ElevatedButton("Enregistrer les opérations du mois", icon=ft.icons.SAVE_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=add_telemetry),
-                ], spacing=14)
+                    ft.ElevatedButton("Enregistrer les opérations du mois", icon=ft.icons.SAVE_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=44, on_click=add_telemetry),
+                ], spacing=14),
+                padding=20,
             ),
             ft.Container(height=18),
-            create_card(table_mco if mco_rows else ft.Text("Aucun historique de maintenance saisi.", italic=True), padding=16),
+            create_card(table_mco if mco_rows else ft.Text("Aucun historique d'exploitation enregistré.", italic=True, color="#64748B"), padding=16),
             build_footer(),
         ],
         spacing=10,
@@ -2558,7 +2842,7 @@ def view_factures(page: ft.Page):
         options=devis_options,
         value=default_devis,
         width=450,
-        border_color=THEME["sage_dark"],
+        border_color="#CBD5E1",
     )
 
     dd_create_type = ft.Dropdown(
@@ -2579,7 +2863,7 @@ def view_factures(page: ft.Page):
         visible=False,
     )
 
-    txt_create_num = ft.TextField(label="N° Facture Explicite (Auto-généré)", width=360, read_only=True, bgcolor=THEME["sage_pale"])
+    txt_create_num = ft.TextField(label="N° Facture Explicite (Auto-généré)", width=360, read_only=True, bgcolor="#F8FAFC")
     txt_create_date_f = ft.TextField(label="Date d'émission (AAAA-MM-JJ)", value=str(datetime.date.today()), width=200)
     txt_create_date_e = ft.TextField(label="Date d'échéance (AAAA-MM-JJ)", value=str(datetime.date.today() + datetime.timedelta(days=15)), width=200)
     txt_create_montant = ft.TextField(label="Montant H.T. à facturer (€) *", width=220)
@@ -2616,10 +2900,10 @@ def view_factures(page: ft.Page):
                 txt_create_montant.value = f"{montant_calc:.2f}"
 
             info_devis_box.content = ft.Container(
-                content=ft.Text(f"✅ Dossier vérifié | Client : {d[3] or d[4]} | Setup : {setup:.2f} € HT (Acompte {pct}%) | Abonnement : {abo:.2f} € HT/mois", size=12, color=ft.colors.GREEN_800, weight=ft.FontWeight.BOLD),
-                bgcolor=ft.colors.GREEN_50,
+                content=ft.Text(f"✅ Dossier vérifié | Client : {d[3] or d[4]} | Setup : {setup:.2f} € HT (Acompte {pct}%) | Abonnement : {abo:.2f} € HT/mois", size=12, color="#047857", weight=ft.FontWeight.BOLD),
+                bgcolor="#ECFDF5",
                 padding=12,
-                border_radius=10,
+                border_radius=8,
             )
             info_devis_box.visible = True
             page.update()
@@ -2644,7 +2928,7 @@ def view_factures(page: ft.Page):
             )
             conn.commit()
             conn.close()
-            show_toast(page, f"Facture explicite {txt_create_num.value} établie avec succès !")
+            show_toast(page, f"Facture officielle {txt_create_num.value} établie avec succès !")
             page.go("/facturation_print")
         except sqlite3.IntegrityError:
             conn.close()
@@ -2652,32 +2936,35 @@ def view_factures(page: ft.Page):
 
     if has_eligibles:
         form_create_view = ft.Column(controls=[
-            ft.Text("Établir une facture avec désignation & nom de société explicite", size=15, weight=ft.FontWeight.BOLD),
+            ft.Text("Établir une facture avec identification client & virement explicites", size=14, weight=ft.FontWeight.W_800, color="#090D16"),
             info_devis_box,
             ft.Row([dd_create_devis, dd_create_type, txt_abo_mois]),
             ft.Row([txt_create_num, txt_create_montant]),
             ft.Row([txt_create_date_f, txt_create_date_e]),
-            ft.ElevatedButton("💾 Émettre la facture officielle", icon=ft.icons.RECEIPT_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, height=48, on_click=do_create_facture),
+            ft.ElevatedButton("Émettre la facture officielle", icon=ft.icons.RECEIPT_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=46, on_click=do_create_facture),
         ], spacing=16)
     else:
         form_create_view = ft.Container(
             content=ft.Column([
-                ft.Text("🔒 ÉMISSION DE FACTURE BLOQUÉE", size=15, weight=ft.FontWeight.BOLD, color=ft.colors.RED_700),
+                ft.Text("VERROU D'ÉMISSION ACTIF : AUCUN DEVIS ÉLIGIBLE", size=14, weight=ft.FontWeight.W_900, color="#B91C1C"),
                 ft.Text(
-                    "Conformément aux règles de Themis ERP, aucune facture ne peut être émise sans que le devis soit 'Validé & Signé' ET que le Dossier Contractuel (7 pages) n'ait été formellement signé.",
+                    "Conformément aux standards de Themis, aucune facture ne peut être émise sans que le devis soit 'Validé & Signé' ET que le Dossier Contractuel (7 pages) n'ait été formellement signé.",
                     size=12,
+                    color="#7F1D1D"
                 ),
                 ft.ElevatedButton(
-                    "👉 Aller dans 'Dossier Contractuel' pour valider la signature",
+                    "Aller dans 'Dossier Contractuel' pour valider la signature",
                     icon=ft.icons.GAVEL_ROUNDED,
-                    bgcolor=THEME["sage"],
+                    bgcolor="#05231A",
                     color=ft.colors.WHITE,
+                    height=42,
                     on_click=lambda e: page.go("/dossier"),
                 ),
-            ], spacing=12),
+            ], spacing=10),
             padding=20,
-            bgcolor=THEME["blush_pale"],
-            border_radius=12,
+            bgcolor="#FEF2F2",
+            border=ft.border.all(1, "#FCA5A5"),
+            border_radius=10,
         )
 
     dd_edit_fact = ft.Dropdown(label="Sélectionner la facture à corriger", options=[ft.dropdown.Option(str(f)) for f in df_fact["numero_facture"].tolist()], width=450)
@@ -2714,9 +3001,9 @@ def view_factures(page: ft.Page):
         page.go("/facturation_print")
 
     form_edit_view = ft.Column(controls=[
-        ft.Text("Modifier ou corriger une facture existante", size=15, weight=ft.FontWeight.BOLD),
+        ft.Text("Modifier ou corriger une facture existante", size=14, weight=ft.FontWeight.W_800, color="#090D16"),
         dd_edit_fact, ft.Row([txt_edit_date_f, txt_edit_date_e]), ft.Row([txt_edit_montant, dd_edit_statut]),
-        ft.ElevatedButton("Enregistrer la correction", icon=ft.icons.SAVE_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=save_correction),
+        ft.ElevatedButton("Enregistrer la correction", icon=ft.icons.SAVE_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, height=44, on_click=save_correction),
     ], spacing=16)
 
     dd_fact_orig = ft.Dropdown(label="Facture d'origine à créditer *", options=[ft.dropdown.Option(str(f)) for f in df_fact["numero_facture"].tolist()], width=450)
@@ -2774,29 +3061,34 @@ def view_factures(page: ft.Page):
         page.go("/facturation_print")
 
     form_avoir_view = ft.Column(controls=[
-        ft.Text("Émettre une note de crédit explicite (Avoir)", size=15, weight=ft.FontWeight.BOLD),
+        ft.Text("Émettre une note de crédit officielle (Avoir)", size=14, weight=ft.FontWeight.W_800, color="#090D16"),
         dd_fact_orig,
         lbl_orig_info,
         ft.Row([txt_montant_avoir, txt_date_avoir]),
         txt_motif_avoir,
-        ft.ElevatedButton("Émettre l'avoir officiel", icon=ft.icons.CREDIT_CARD_ROUNDED, bgcolor=THEME["blush_dark"], color=ft.colors.WHITE, on_click=create_avoir),
+        ft.ElevatedButton("Émettre l'avoir officiel", icon=ft.icons.CREDIT_CARD_ROUNDED, bgcolor="#B45309", color=ft.colors.WHITE, height=44, on_click=create_avoir),
     ], spacing=16)
 
-    # --- MODE 4 : JOURNAL DES RELANCES & RECOUVREMENT AVEC AUTO-MIGRATION ---
+    # --- MODE 4 : JOURNAL DES RELANCES & RECOUVREMENT ---
     def open_email_reader(r_row):
         dlg = ft.AlertDialog(
             title=ft.Row([
-                ft.Icon(ft.icons.MARK_EMAIL_READ_ROUNDED, color=THEME["sage_dark"]),
-                ft.Text(f"Copie Conforme Relance N°{r_row['niveau']} — {r_row['numero_facture']}", size=15, weight=ft.FontWeight.BOLD),
-            ], spacing=8),
+                ft.Container(
+                    content=ft.Icon(ft.icons.MARK_EMAIL_READ_ROUNDED, color="#A7F3D0", size=18),
+                    bgcolor="#0B382A",
+                    padding=6,
+                    border_radius=6,
+                ),
+                ft.Text(f"COPIE CONFORME • RELANCE N°{r_row['niveau']} ({r_row['numero_facture']})", size=14, weight=ft.FontWeight.W_900, color="#FFFFFF"),
+            ], spacing=10),
             content=ft.Container(
                 content=ft.Column([
-                    ft.Text(f"Date d'envoi : {r_row['date_relance']} | Client : {r_row['client_societe'] or r_row['client_nom']}", size=11, color=THEME["text_muted"], weight=ft.FontWeight.BOLD),
+                    ft.Text(f"DATE D'EXPÉDITION : {r_row['date_relance']} | COMPTE : {r_row['client_societe'] or r_row['client_nom']}", size=11, color="#64748B", weight=ft.FontWeight.BOLD),
                     ft.Divider(height=10),
                     ft.Text(r_row["corps_envoye"] or "Texte non archivé pour cette relance.", size=12, selectable=True),
                 ], scroll=ft.ScrollMode.AUTO, spacing=10),
-                width=650,
-                height=380,
+                width=680,
+                height=390,
                 padding=12,
             ),
             actions=[ft.TextButton("Fermer", on_click=lambda e: close_dlg(dlg))],
@@ -2819,7 +3111,6 @@ def view_factures(page: ft.Page):
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
 
-        # Auto-migration de sécurité : ajoute la colonne corps_envoye si elle n'existe pas encore
         try:
             c.execute("ALTER TABLE relances_historique ADD COLUMN corps_envoye TEXT")
             conn.commit()
@@ -2849,15 +3140,15 @@ def view_factures(page: ft.Page):
             c_nom = r["client_societe"] or f"{r['client_prenom']} {r['client_nom']}"
 
             badge_acquittement = ft.Container(
-                content=ft.Text(f"Acquittée le {r['date_paiement'] or 'Enregistrée'}" if is_acquittee else "En attente ⏳", size=11, weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800 if is_acquittee else ft.colors.RED_800),
-                bgcolor=ft.colors.GREEN_50 if is_acquittee else ft.colors.RED_50,
+                content=ft.Text(f"Acquittée le {r['date_paiement'] or 'Constaté'}" if is_acquittee else "En attente ⏳", size=10, weight=ft.FontWeight.BOLD, color="#047857" if is_acquittee else "#B91C1C"),
+                bgcolor="#ECFDF5" if is_acquittee else "#FEF2F2",
                 border_radius=6,
                 padding=ft.padding.symmetric(horizontal=8, vertical=4),
             )
 
             badge_niveau = ft.Container(
-                content=ft.Text(f"Niveau {r['niveau']}", size=11, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
-                bgcolor=THEME["sage_dark"] if r["niveau"] == 1 else (ft.colors.ORANGE_800 if r["niveau"] == 2 else ft.colors.RED_800),
+                content=ft.Text(f"Niveau {r['niveau']}", size=10, weight=ft.FontWeight.BOLD, color=ft.colors.WHITE),
+                bgcolor="#05231A" if r["niveau"] == 1 else ("#B45309" if r["niveau"] == 2 else "#B91C1C"),
                 border_radius=6,
                 padding=ft.padding.symmetric(horizontal=8, vertical=3),
             )
@@ -2872,10 +3163,10 @@ def view_factures(page: ft.Page):
                     ft.DataCell(badge_acquittement),
                     ft.DataCell(
                         ft.ElevatedButton(
-                            "👁️ Relire l'email",
+                            "Relire l'email",
                             icon=ft.icons.VISIBILITY_OUTLINED,
                             height=30,
-                            bgcolor=THEME["sage"],
+                            bgcolor="#05231A",
                             color=ft.colors.WHITE,
                             on_click=lambda e, row=r: open_email_reader(row),
                         )
@@ -2885,38 +3176,45 @@ def view_factures(page: ft.Page):
 
         table_journal = ft.DataTable(
             columns=[
-                ft.DataColumn(ft.Text("Date Relance")),
-                ft.DataColumn(ft.Text("N° Facture")),
-                ft.DataColumn(ft.Text("Client")),
-                ft.DataColumn(ft.Text("Niveau")),
-                ft.DataColumn(ft.Text("Montant")),
-                ft.DataColumn(ft.Text("Date d'Acquittement")),
-                ft.DataColumn(ft.Text("Contenu")),
+                ft.DataColumn(ft.Text("Date Relance", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("N° Facture", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Client", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Niveau", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Montant HT", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("État d'Acquittement", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Accusé", weight=ft.FontWeight.BOLD)),
             ],
             rows=rows,
-            heading_row_color=THEME["sage_pale"],
-            border=ft.border.all(1, THEME["sage_light"]),
+            heading_row_color="#F8FAFC",
+            border=ft.border.all(1, "#CBD5E1"),
             border_radius=8,
         )
 
         return ft.Column([
             ft.Row([
                 ft.Column([
-                    ft.Text("TOTAL RELANCES EXPÉDIÉES", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD),
-                    ft.Text(f"{total_relances} envoi(s)", size=20, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
+                    ft.Text("TOTAL RELANCES EXPÉDIÉES", size=10, color="#64748B", weight=ft.FontWeight.BOLD),
+                    ft.Text(f"{total_relances} envoi(s)", size=20, weight=ft.FontWeight.BOLD, color="#090D16"),
                 ]),
                 ft.Column([
-                    ft.Text("MONTANT RÉGULARISÉ APRÈS RELANCE", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD),
-                    ft.Text(f"{total_recouvre:.2f} € Encaissés", size=20, weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800),
+                    ft.Text("MONTANT RÉGULARISÉ POST-RELANCE", size=10, color="#64748B", weight=ft.FontWeight.BOLD),
+                    ft.Text(f"{total_recouvre:.2f} € Encaissés", size=20, weight=ft.FontWeight.BOLD, color="#047857"),
                 ]),
             ], spacing=30),
-            ft.Divider(height=16, color=THEME["sage_light"]),
-            table_journal if rows else ft.Text("Aucune relance n'a encore été expédiée via Make.", italic=True),
+            ft.Divider(height=16, color="#CBD5E1"),
+            table_journal if rows else ft.Text("Aucune relance n'a encore été expédiée via Make.", italic=True, color="#64748B"),
         ], spacing=14)
 
     def set_mode(mode):
         nonlocal current_mode
         current_mode = mode
+        
+        # Styles de la barre segmentée
+        for m, btn in [("create", btn_mode_create), ("edit", btn_mode_edit), ("avoir", btn_mode_avoir), ("journal", btn_mode_journal)]:
+            is_m = (mode == m)
+            btn.bgcolor = "#05231A" if is_m else ft.colors.TRANSPARENT
+            btn.color = ft.colors.WHITE if is_m else "#475569"
+
         if mode == "create":
             form_dynamic_container.content = form_create_view
             if has_eligibles: update_create_form()
@@ -2924,21 +3222,28 @@ def view_factures(page: ft.Page):
             form_dynamic_container.content = form_edit_view
         elif mode == "avoir":
             form_dynamic_container.content = form_avoir_view
-        else: # journal
+        else:
             form_dynamic_container.content = build_journal_relances_view()
         page.update()
 
     btn_mode_create = ft.ElevatedButton("1. Établir une Facture", icon=ft.icons.ADD_CARD_ROUNDED, on_click=lambda e: set_mode("create"))
     btn_mode_edit = ft.ElevatedButton("2. Modifier / Corriger", icon=ft.icons.EDIT_NOTE_ROUNDED, on_click=lambda e: set_mode("edit"))
     btn_mode_avoir = ft.ElevatedButton("3. Émettre un Avoir", icon=ft.icons.REMOVE_CIRCLE_OUTLINE_ROUNDED, on_click=lambda e: set_mode("avoir"))
-    btn_mode_journal = ft.ElevatedButton("4. 📜 Journal des Relances", icon=ft.icons.HISTORY_ROUNDED, bgcolor=THEME["sage_dark"], color=ft.colors.WHITE, on_click=lambda e: set_mode("journal"))
+    btn_mode_journal = ft.ElevatedButton("4. Journal des Relances", icon=ft.icons.HISTORY_ROUNDED, on_click=lambda e: set_mode("journal"))
+
+    # Initialisation de la barre
     set_mode("create")
+
+    segmented_bar = ft.Container(
+        content=ft.Row([btn_mode_create, btn_mode_edit, btn_mode_avoir, btn_mode_journal], spacing=8),
+        padding=ft.padding.symmetric(vertical=4),
+    )
 
     return ft.ListView(
         controls=[
-            create_header("🧾", "Facturation, Avoirs & Recouvrement", "Émission verrouillée, abonnements, avoirs et journal d'audit des relances"),
-            ft.Row([btn_mode_create, btn_mode_edit, btn_mode_avoir, btn_mode_journal], spacing=12),
-            ft.Container(height=14),
+            create_header("FAC.01", "FACTURATION, AVOIRS & RECOUVREMENT", "GESTION DE PRÉCISION • ÉMISSION & PISTE D'AUDIT COMPTABLE"),
+            segmented_bar,
+            ft.Container(height=12),
             create_card(form_dynamic_container, padding=24),
             build_footer(),
         ],
@@ -2954,8 +3259,8 @@ def view_facture_interactive(page: ft.Page):
     ent = get_entreprise_info()
     conn.close()
 
-    dd_select = ft.Dropdown(label="Sélectionner la facture explicite :", options=[ft.dropdown.Option(str(i[0])) for i in items.values], width=450, border_color=THEME["sage_light"])
-    dd_statut = ft.Dropdown(label="Nouveau statut :", options=[ft.dropdown.Option(s) for s in STATUTS_FACTURES], width=240, border_color=THEME["sage_light"])
+    dd_select = ft.Dropdown(label="Sélectionner la pièce comptable :", options=[ft.dropdown.Option(str(i[0])) for i in items.values], width=450, border_color="#CBD5E1")
+    dd_statut = ft.Dropdown(label="Changer le statut :", options=[ft.dropdown.Option(s) for s in STATUTS_FACTURES], width=240, border_color="#CBD5E1")
     invoice_sheet_container = ft.Container(visible=False)
 
     def render_in_app_invoice(f_row):
@@ -2967,13 +3272,13 @@ def view_facture_interactive(page: ft.Page):
         stamp_control = ft.Container()
         if is_payee:
             stamp_control = ft.Container(
-                content=ft.Text("PAYÉE", size=24, weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_700),
-                border=ft.border.all(3, ft.colors.GREEN_700), border_radius=8, padding=ft.padding.symmetric(horizontal=18, vertical=6), rotate=ft.transform.Rotate(-0.2)
+                content=ft.Text("PAYÉE", size=24, weight=ft.FontWeight.W_900, color="#047857"),
+                border=ft.border.all(3.5, "#047857"), border_radius=8, padding=ft.padding.symmetric(horizontal=18, vertical=6), rotate=ft.transform.Rotate(-0.2)
             )
         elif is_annulee:
             stamp_control = ft.Container(
-                content=ft.Text("ANNULÉE", size=24, weight=ft.FontWeight.BOLD, color=ft.colors.RED_700),
-                border=ft.border.all(3, ft.colors.RED_700), border_radius=8, padding=ft.padding.symmetric(horizontal=18, vertical=6), rotate=ft.transform.Rotate(-0.2)
+                content=ft.Text("ANNULÉE", size=24, weight=ft.FontWeight.W_900, color="#B91C1C"),
+                border=ft.border.all(3.5, "#B91C1C"), border_radius=8, padding=ft.padding.symmetric(horizontal=18, vertical=6), rotate=ft.transform.Rotate(-0.2)
             )
 
         is_tva = (ent.get("assujetti_tva") == 1)
@@ -2982,40 +3287,76 @@ def view_facture_interactive(page: ft.Page):
         net_ttc = montant + montant_tva
 
         paper_content = ft.Container(
-            bgcolor=ft.colors.WHITE, border=ft.border.all(1, "#CBD5E0"), border_radius=12, padding=32,
+            bgcolor="#FFFFFF", border=ft.border.all(1, "#CBD5E1"), border_radius=12, padding=32,
             content=ft.Column(controls=[
                 ft.Row(controls=[
-                    ft.Column([ft.Text(ent['nom'], size=19, weight=ft.FontWeight.BOLD, color="#1A365D"), ft.Text(ent['adresse'], size=12, color="#555"), ft.Text(f"{ent['forme_juridique']} - SIRET : {ent['siret']}", size=11, color="#777")]),
-                    ft.Column([ft.Text(f"{f_row['type_facture'].upper()}", size=17, weight=ft.FontWeight.BOLD, color="#1A365D"), ft.Text(f"N° {f_row['numero_facture']}", size=13, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]), ft.Text(f"Date : {f_row['date_facture']}", size=12, color="#555")], horizontal_alignment=ft.CrossAxisAlignment.END),
+                    ft.Column([
+                        ft.Text(ent['nom'], size=18, weight=ft.FontWeight.W_900, color="#05231A"),
+                        ft.Text(ent['adresse'], size=12, color="#475569"),
+                        ft.Text(f"{ent['forme_juridique']} — SIRET : {ent['siret']}", size=11, color="#64748B"),
+                    ]),
+                    ft.Column([
+                        ft.Text(f"{f_row['type_facture'].upper()}", size=16, weight=ft.FontWeight.W_900, color="#05231A"),
+                        ft.Text(f"N° {f_row['numero_facture']}", size=13, weight=ft.FontWeight.BOLD, color="#047857"),
+                        ft.Text(f"Date d'émission : {f_row['date_facture']}", size=11, color="#475569"),
+                    ], horizontal_alignment=ft.CrossAxisAlignment.END),
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ft.Divider(height=28, color="#E2E8F0"),
                 ft.Row(controls=[
-                    ft.Container(content=ft.Column([ft.Text("Facturé à :", size=12, weight=ft.FontWeight.BOLD, color="#2B6CB0"), ft.Text(f_row['client_societe'] or 'Particulier', size=13, weight=ft.FontWeight.BOLD), ft.Text(f"{f_row['client_prenom']} {f_row['client_nom']}", size=12), ft.Text(f_row['client_adresse'], size=12)]), bgcolor="#F8FAFC", border=ft.border.all(1, "#CBD5E0"), border_radius=8, padding=14, width=320),
-                    ft.Container(content=ft.Column([ft.Text("Détails :", size=12, weight=ft.FontWeight.BOLD, color="#2B6CB0"), ft.Text(f"Devis : {f_row['numero_devis']}", size=12), ft.Text(f"État : {statut}", size=12, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"])]), bgcolor="#F8FAFC", border=ft.border.all(1, "#CBD5E0"), border_radius=8, padding=14, width=320),
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Text("Facturé à :", size=11, weight=ft.FontWeight.BOLD, color="#64748B"),
+                            ft.Text(f_row['client_societe'] or 'Particulier', size=13, weight=ft.FontWeight.W_800, color="#090D16"),
+                            ft.Text(f"{f_row['client_prenom']} {f_row['client_nom']}", size=12, color="#475569"),
+                            ft.Text(f_row['client_adresse'], size=12, color="#475569"),
+                        ], spacing=3),
+                        bgcolor="#F8FAFC", border=ft.border.all(1, "#CBD5E1"), border_radius=8, padding=14, width=320
+                    ),
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Text("Modalités & Références :", size=11, weight=ft.FontWeight.BOLD, color="#64748B"),
+                            ft.Text(f"Devis lié : {f_row['numero_devis']}", size=12, weight=ft.FontWeight.BOLD, color="#090D16"),
+                            ft.Text(f"Échéance : {f_row['date_echeance']}", size=12, color="#475569"),
+                            ft.Text(f"Statut comptable : {statut}", size=12, weight=ft.FontWeight.BOLD, color="#047857" if is_payee else "#B45309"),
+                        ], spacing=3),
+                        bgcolor="#F8FAFC", border=ft.border.all(1, "#CBD5E1"), border_radius=8, padding=14, width=320
+                    ),
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ft.Container(height=18),
                 ft.DataTable(
-                    columns=[ft.DataColumn(ft.Text("Désignation", weight=ft.FontWeight.BOLD)), ft.DataColumn(ft.Text("Qté", weight=ft.FontWeight.BOLD)), ft.DataColumn(ft.Text("Montant HT", weight=ft.FontWeight.BOLD))],
-                    rows=[ft.DataRow(cells=[ft.DataCell(ft.Text(f"{f_row['type_facture']} — Réf {f_row['numero_devis']}")), ft.DataCell(ft.Text("1")), ft.DataCell(ft.Text(f"{montant:.2f} €"))])],
-                    heading_row_color="#E7EEE6", border=ft.border.all(1, "#CBD5E0")
+                    columns=[
+                        ft.DataColumn(ft.Text("Désignation de la Prestation", weight=ft.FontWeight.BOLD)),
+                        ft.DataColumn(ft.Text("Qté", weight=ft.FontWeight.BOLD)),
+                        ft.DataColumn(ft.Text("Montant HT", weight=ft.FontWeight.BOLD)),
+                    ],
+                    rows=[
+                        ft.DataRow(cells=[
+                            ft.DataCell(ft.Text(f"{f_row['type_facture']} — Réf {f_row['numero_devis']}", weight=ft.FontWeight.W_600)),
+                            ft.DataCell(ft.Text("1")),
+                            ft.DataCell(ft.Text(f"{montant:.2f} €", weight=ft.FontWeight.BOLD)),
+                        ])
+                    ],
+                    heading_row_color="#F8FAFC",
+                    border=ft.border.all(1, "#CBD5E1"),
+                    border_radius=8,
                 ),
                 ft.Container(height=18),
                 ft.Row(controls=[
                     ft.Container(expand=True),
                     ft.Column([
-                        ft.Text(f"Total H.T. : {montant:.2f} €", size=13),
-                        ft.Text(f"TVA ({taux_tva:.1f}%) : {montant_tva:.2f} €" if is_tva else "Franchise de TVA (Art. 293 B CGI)", size=12, italic=True),
-                        ft.Text(f"NET À PAYER : {net_ttc:.2f} €", size=19, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
-                    ], horizontal_alignment=ft.CrossAxisAlignment.END)
+                        ft.Text(f"Total H.T. : {montant:.2f} €", size=13, color="#475569"),
+                        ft.Text(f"TVA ({taux_tva:.1f}%) : {montant_tva:.2f} €" if is_tva else "Franchise de TVA (Art. 293 B CGI)", size=12, italic=True, color="#64748B"),
+                        ft.Text(f"NET À PAYER : {net_ttc:.2f} €", size=19, weight=ft.FontWeight.W_900, color="#05231A"),
+                    ], horizontal_alignment=ft.CrossAxisAlignment.END, spacing=3)
                 ]),
                 ft.Container(height=14),
                 ft.Container(
                     content=ft.Column([
-                        ft.Text("🏦 COORDONNÉES BANCAIRES POUR VIREMENT", size=11, weight=ft.FontWeight.BOLD, color="#1A365D"),
-                        ft.Text(f"Banque : {ent['banque_nom'] or 'Non renseignée'} | Titulaire : {ent['titulaire_compte'] or ent['nom']}", size=11),
-                        ft.Text(f"IBAN : {ent['iban'] or 'Non renseigné'} | BIC : {ent['bic'] or 'Non renseigné'}", size=11, weight=ft.FontWeight.BOLD, color="#2B6CB0"),
+                        ft.Text("🏦 RÈGLEMENT PAR VIREMENT BANCAIRE", size=11, weight=ft.FontWeight.BOLD, color="#05231A"),
+                        ft.Text(f"Banque : {ent['banque_nom'] or 'Établissement Bancaire'} | Titulaire : {ent['titulaire_compte'] or ent['nom']}", size=11, color="#475569"),
+                        ft.Text(f"IBAN : {ent['iban'] or 'Non renseigné'} | BIC : {ent['bic'] or 'Non renseigné'}", size=11, weight=ft.FontWeight.BOLD, color="#047857"),
                     ], spacing=2),
-                    bgcolor="#F8FAFC", border=ft.border.all(1, "#CBD5E0"), border_radius=6, padding=10,
+                    bgcolor="#F8FAFC", border=ft.border.all(1, "#CBD5E1"), border_radius=6, padding=12,
                 ),
             ])
         )
@@ -3055,7 +3396,6 @@ def view_facture_interactive(page: ft.Page):
         cursor.execute("UPDATE factures SET statut = ? WHERE numero_facture = ?", (dd_statut.value, dd_select.value))
 
         if dd_statut.value == "Facture Acquittée":
-            # 1. Si elle passe en Acquittée, on enregistre l'encaissement si absent
             cursor.execute("SELECT * FROM paiements WHERE numero_facture = ?", (dd_select.value,))
             if not cursor.fetchone():
                 cursor.execute(
@@ -3075,13 +3415,11 @@ def view_facture_interactive(page: ft.Page):
                         (dd_select.value, str(datetime.date.today()), c_name, fd[4], float(fd[0]))
                     )
         else:
-            # 2. SYNCHRONISATION INVERSE : Si elle repasse en "Facture Émise" ou "Annulée",
-            # on retire immédiatement la ligne du Livre des Recettes !
             cursor.execute("DELETE FROM paiements WHERE numero_facture = ?", (dd_select.value,))
 
         conn.commit()
         conn.close()
-        show_toast(page, f"Statut mis à jour : {dd_statut.value}. Livre des recettes synchronisé !")
+        show_toast(page, f"Statut actualisé : {dd_statut.value}. Livre des recettes synchronisé !")
         load_invoice(None)
 
     def export_facturx(e):
@@ -3112,20 +3450,20 @@ def view_facture_interactive(page: ft.Page):
         with open(xml_path, "w", encoding="utf-8") as xf:
             xf.write(xml_str)
 
-        show_toast(page, f"Fichier Factur-X (CII) généré avec succès !")
+        show_toast(page, "Fichier Factur-X XML généré avec succès !")
         webbrowser.open(f"file://{exports_dir}")
 
     return ft.ListView(
         controls=[
-            create_header("🖨️", "Aperçu, Factur-X & Gestion", "Consultation, réimpression, tampons virtuels et export XML Factur-X 2026"),
+            create_header("FAC.02", "APERÇU, FACTUR-X & GESTION DES FACTURES", "CONSULTATION OFFICIELLE • TAMPONS VIRTUELS & EXPORT XML 2026"),
             create_card(
                 ft.Row(
                     controls=[
                         dd_select,
                         dd_statut,
-                        ft.ElevatedButton("Valider Statut", icon=ft.icons.CHECK_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=update_invoice_status),
-                        ft.ElevatedButton("🖨️ Imprimer Facture (PDF)", icon=ft.icons.PRINT_ROUNDED, bgcolor=THEME["sage_dark"], color=ft.colors.WHITE, height=45, on_click=lambda e: execute_print_facture(dd_select.value, page) if dd_select.value else show_toast(page, "Sélectionnez une facture.", is_error=True)),
-                        ft.ElevatedButton("⚡ Export Factur-X (XML)", icon=ft.icons.INTEGRATION_INSTRUCTIONS_ROUNDED, bgcolor=ft.colors.BLUE_800, color=ft.colors.WHITE, height=45, on_click=export_facturx),
+                        ft.ElevatedButton("Valider Statut", icon=ft.icons.CHECK_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, height=44, on_click=update_invoice_status),
+                        ft.ElevatedButton("Imprimer Facture (PDF)", icon=ft.icons.PRINT_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=44, on_click=lambda e: execute_print_facture(dd_select.value, page) if dd_select.value else show_toast(page, "Sélectionnez une facture.", is_error=True)),
+                        ft.ElevatedButton("Export Factur-X (XML)", icon=ft.icons.INTEGRATION_INSTRUCTIONS_ROUNDED, bgcolor="#0F172A", color=ft.colors.WHITE, height=44, on_click=export_facturx),
                     ],
                     alignment=ft.MainAxisAlignment.START,
                 )
@@ -3363,30 +3701,31 @@ def view_dossier_contractuel(page: ft.Page):
     default_devis = str(items.iloc[0]["numero_devis"]) if not items.empty else None
 
     dd_select = ft.Dropdown(
-        label="Sélectionner le devis :",
-        options=[ft.dropdown.Option(key=str(row[0]), text=f"{row[0]} — {row[1] or row[2]} ({'Signé ✅' if row[4] == 1 else 'Non signé ⚠️'})") for row in items.itertuples(index=False)],
+        label="Sélectionner le dossier de devis :",
+        options=[ft.dropdown.Option(key=str(row[0]), text=f"{row[0]} — {row[1] or row[2]} ({'Signé ✅' if row[4] == 1 else 'Non signé ⚠️'})") for _, row in items.iterrows()],
         value=default_devis,
         width=450,
+        border_color="#CBD5E1",
     )
 
     signature_status_box = ft.Container(visible=False)
     txt_date_sign = ft.TextField(label="Date de signature effective (AAAA-MM-JJ)", value=str(datetime.date.today()), width=240)
 
     selected_file_path = None
-    lbl_file_selected = ft.Text("Aucun fichier de scan sélectionné.", size=12, italic=True)
+    lbl_file_selected = ft.Text("Aucun fichier de scan sélectionné.", size=12, italic=True, color="#64748B")
 
     def on_file_picked(e: ft.FilePickerResultEvent):
         nonlocal selected_file_path
         if e.files and len(e.files) > 0:
             selected_file_path = e.files[0].path
             lbl_file_selected.value = f"📄 Prêt à archiver : {os.path.basename(selected_file_path)}"
-            lbl_file_selected.color = ft.colors.GREEN_800
+            lbl_file_selected.color = "#047857"
             page.update()
 
     file_picker = ft.FilePicker(on_result=on_file_picked)
     page.overlay.append(file_picker)
 
-    txt_scan_note = ft.TextField(label="Titre ou description du scan (ex: Contrat signé avec cachet commercial)", expand=True)
+    txt_scan_note = ft.TextField(label="Description ou référence du scan (ex: Contrat signé avec cachet commercial)", expand=True)
     scans_history_container = ft.Container()
 
     def refresh_scans_history(devis_num):
@@ -3395,7 +3734,7 @@ def view_dossier_contractuel(page: ft.Page):
         conn.close()
 
         if df_scans.empty:
-            scans_history_container.content = ft.Text("Aucun document scanné n'a encore été rattaché à ce contrat.", italic=True, size=12)
+            scans_history_container.content = ft.Text("Aucun document scanné n'a encore été rattaché à ce contrat.", italic=True, size=12, color="#64748B")
         else:
             rows = []
             for _, sc in df_scans.iterrows():
@@ -3409,16 +3748,25 @@ def view_dossier_contractuel(page: ft.Page):
                             ft.ElevatedButton(
                                 "Consulter le scan",
                                 icon=ft.icons.VISIBILITY_ROUNDED,
-                                bgcolor=THEME["sage"],
+                                bgcolor="#05231A",
                                 color=ft.colors.WHITE,
+                                height=30,
                                 on_click=lambda e, p=fpath: webbrowser.open(f"file://{p}"),
                             )
                         ),
                     ])
                 )
             scans_history_container.content = ft.DataTable(
-                columns=[ft.DataColumn(ft.Text("Nom du document")), ft.DataColumn(ft.Text("Date d'archivage")), ft.DataColumn(ft.Text("Notes")), ft.DataColumn(ft.Text("Action"))],
-                rows=rows, heading_row_color=THEME["sage_pale"], border=ft.border.all(1, THEME["sage_light"]), border_radius=8,
+                columns=[
+                    ft.DataColumn(ft.Text("Nom de la pièce")),
+                    ft.DataColumn(ft.Text("Date d'archivage")),
+                    ft.DataColumn(ft.Text("Observations")),
+                    ft.DataColumn(ft.Text("Action")),
+                ],
+                rows=rows,
+                heading_row_color="#F8FAFC",
+                border=ft.border.all(1, "#CBD5E1"),
+                border_radius=8,
             )
         page.update()
 
@@ -3443,16 +3791,16 @@ def view_dossier_contractuel(page: ft.Page):
         statut_devis = d[0]
 
         signature_status_box.content = ft.Container(
-            bgcolor=ft.colors.GREEN_50 if is_signe else THEME["blush_pale"],
-            border=ft.border.all(1, ft.colors.GREEN_400 if is_signe else THEME["blush_dark"]),
-            border_radius=10,
+            bgcolor="#ECFDF5" if is_signe else "#FEF2F2",
+            border=ft.border.all(1, "#10B981" if is_signe else "#FCA5A5"),
+            border_radius=8,
             padding=14,
             content=ft.Row([
-                ft.Icon(ft.icons.CHECK_CIRCLE_ROUNDED if is_signe else ft.icons.WARNING_AMBER_ROUNDED, color=ft.colors.GREEN_800 if is_signe else ft.colors.RED_800),
+                ft.Icon(ft.icons.CHECK_CIRCLE_ROUNDED if is_signe else ft.icons.WARNING_AMBER_ROUNDED, color="#047857" if is_signe else "#B91C1C", size=22),
                 ft.Column([
-                    ft.Text(f"Statut Devis : {statut_devis} | Dossier Contractuel : {'VALIDÉ & SIGNÉ' if is_signe else 'NON SIGNÉ (Émission de facture bloquée)'}", weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_900 if is_signe else ft.colors.RED_900),
-                    ft.Text(f"Date de signature enregistrée : {d[2] or 'Aucune'}" if is_signe else "Pour débloquer la facturation, validez la signature ci-dessous.", size=12),
-                ]),
+                    ft.Text(f"Statut Devis : {statut_devis} | Dossier Contractuel : {'VALIDÉ & SIGNÉ' if is_signe else 'NON SIGNÉ (Émission de facture verrouillée)'}", weight=ft.FontWeight.BOLD, color="#065F46" if is_signe else "#7F1D1D", size=13),
+                    ft.Text(f"Date de signature enregistrée : {d[2] or 'Aucune'}" if is_signe else "Pour débloquer la facturation, validez la signature ci-dessous.", size=11, color="#047857" if is_signe else "#991B1B"),
+                ], spacing=2),
             ]),
         )
         signature_status_box.visible = True
@@ -3507,7 +3855,7 @@ def view_dossier_contractuel(page: ft.Page):
         show_toast(page, "Scan du contrat archivé avec succès dans le dossier client !")
         selected_file_path = None
         lbl_file_selected.value = "Aucun fichier de scan sélectionné."
-        lbl_file_selected.color = THEME["text_muted"]
+        lbl_file_selected.color = "#64748B"
         txt_scan_note.value = ""
         refresh_scans_history(dd_select.value)
 
@@ -3543,32 +3891,32 @@ def view_dossier_contractuel(page: ft.Page):
 
     return ft.ListView(
         controls=[
-            create_header("⚖️", "Dossier Contractuel Complet (7 Pages)", "Édition intégrale, validation de signature et archivage des scans"),
+            create_header("CTR.01", "DOSSIER CONTRACTUEL COMPLET (7 PAGES)", "SÉCURITÉ JURIDIQUE • SIGNATURE OBLIGATOIRE & ARCHIVAGE SCANS"),
             create_card(
                 ft.Column([
                     ft.Row([
                         dd_select,
-                        ft.ElevatedButton("📄 Ouvrir et Imprimer le Dossier (7 Pages)", icon=ft.icons.DESCRIPTION_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, height=48, on_click=print_dossier),
-                    ]),
+                        ft.ElevatedButton("Ouvrir et Imprimer le Dossier (7P)", icon=ft.icons.DESCRIPTION_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, height=46, on_click=print_dossier),
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                     signature_status_box,
-                    ft.Divider(height=18),
-                    ft.Text("✍️ Valider la signature du Dossier Contractuel (Condition préalable à la facturation) :", weight=ft.FontWeight.BOLD, size=13),
+                    ft.Divider(height=18, color="#CBD5E1"),
+                    ft.Text("Validation juridique de la signature (Condition préalable à la facturation) :", weight=ft.FontWeight.W_800, size=13, color="#090D16"),
                     ft.Row([
                         txt_date_sign,
-                        ft.ElevatedButton("Marquer comme Signé & Valider Devis", icon=ft.icons.CHECK_ROUNDED, bgcolor=ft.colors.GREEN_800, color=ft.colors.WHITE, on_click=mark_contract_signed),
+                        ft.ElevatedButton("Marquer comme Signé & Valider Devis", icon=ft.icons.CHECK_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=44, on_click=mark_contract_signed),
                     ]),
-                    ft.Divider(height=18),
-                    ft.Text("📎 Archiver le Scan / PDF signé du client :", weight=ft.FontWeight.BOLD, size=13),
+                    ft.Divider(height=18, color="#CBD5E1"),
+                    ft.Text("Rattachement et archivage du scan/PDF signé par le client :", weight=ft.FontWeight.W_800, size=13, color="#090D16"),
                     ft.Row([
-                        ft.ElevatedButton("Choisir le fichier PDF/Scan...", icon=ft.icons.UPLOAD_FILE_ROUNDED, on_click=lambda e: file_picker.pick_files()),
+                        ft.ElevatedButton("Choisir le fichier PDF/Scan...", icon=ft.icons.UPLOAD_FILE_ROUNDED, bgcolor="#F1F5F9", color="#090D16", on_click=lambda e: file_picker.pick_files()),
                         lbl_file_selected,
                     ]),
                     ft.Row([
                         txt_scan_note,
-                        ft.ElevatedButton("Rattacher au dossier client", icon=ft.icons.ATTACH_FILE_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=attach_scanned_file),
+                        ft.ElevatedButton("Rattacher au dossier client", icon=ft.icons.ATTACH_FILE_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, height=44, on_click=attach_scanned_file),
                     ]),
                     ft.Container(height=12),
-                    ft.Text("📁 Contrats et scans archivés pour ce devis :", weight=ft.FontWeight.BOLD, size=12),
+                    ft.Text("Contrats et pièces scannées archivées pour ce devis :", weight=ft.FontWeight.W_800, size=12, color="#475569"),
                     scans_history_container,
                 ], spacing=12),
                 padding=20,
@@ -3774,12 +4122,12 @@ def view_settings(page: ft.Page):
 def main(page: ft.Page):
     init_db()
 
-    page.title = "Themis ERP - Micro-Entreprise"
-    page.bgcolor = THEME["cream"]
+    page.title = "Themis ERP - Micro-Entreprise & B2B"
+    page.bgcolor = THEME.get("bg", "#F8FAFC")
     page.padding = 0
 
     page.fonts = {
-        "Manrope": "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+        "Manrope": "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800;900&display=swap"
     }
     page.theme = ft.Theme(font_family="Manrope")
 
@@ -3789,7 +4137,7 @@ def main(page: ft.Page):
     except Exception:
         pass
 
-    content_area = ft.Container(expand=True, padding=ft.padding.symmetric(horizontal=30, vertical=20))
+    content_area = ft.Container(expand=True, padding=ft.padding.symmetric(horizontal=28, vertical=20))
 
     def route_change(e):
         route = page.route
@@ -3811,104 +4159,133 @@ def main(page: ft.Page):
 
     page.on_route_change = route_change
 
-    def nav_sub_btn(icon, text, route, section="general"):
-        is_active = page.route == route
-        cfg = SECTION_COLORS.get(section, SECTION_COLORS["general"])
+    def nav_sub_btn(icon, text, route):
+        """Bouton de navigation épuré avec surlignage émeraude actif."""
+        is_active = (page.route == route)
         def click(e): page.go(route)
+
+        active_border = ft.border.only(left=ft.BorderSide(3.5, "#047857")) if is_active else None
 
         return ft.Container(
             content=ft.Row([
-                ft.Container(content=ft.Icon(icon, size=16, color=cfg["icon_color"]), bgcolor=cfg["icon_bg"], border_radius=6, padding=5),
-                ft.Text(text, size=12, weight=ft.FontWeight.W_600 if not is_active else ft.FontWeight.BOLD, color=THEME["text"] if not is_active else THEME["sage_dark"]),
-            ], spacing=10),
-            padding=ft.padding.symmetric(horizontal=10, vertical=6),
-            border_radius=8,
-            bgcolor=THEME["sage_light"] if is_active else ft.colors.TRANSPARENT,
+                ft.Icon(
+                    icon, 
+                    size=16, 
+                    color="#047857" if is_active else "#64748B"
+                ),
+                ft.Text(
+                    text, 
+                    size=12, 
+                    weight=ft.FontWeight.W_800 if is_active else ft.FontWeight.W_600, 
+                    color="#090D16" if is_active else "#475569"
+                ),
+            ], spacing=12),
+            padding=ft.padding.symmetric(horizontal=12, vertical=8),
+            border_radius=ft.border_radius.only(top_right=8, bottom_right=8),
+            border=active_border,
+            bgcolor="#F1F5F9" if is_active else ft.colors.TRANSPARENT,
             on_click=click,
             ink=True,
         )
 
-    def nav_accordion_section(title, icon, color_key, sub_buttons, is_open=True):
-        cfg = SECTION_COLORS.get(color_key, SECTION_COLORS["general"])
+    def nav_accordion_section(title, icon, sub_buttons, is_open=True):
+        """Pôle de navigation accordéon corporate sobre et compact."""
         return ft.ExpansionTile(
-            leading=ft.Container(content=ft.Icon(icon, size=18, color=cfg["icon_color"]), bgcolor=cfg["icon_bg"], border_radius=8, padding=6),
+            leading=ft.Container(
+                content=ft.Icon(icon, size=16, color="#05231A"),
+                bgcolor="#F1F5F9",
+                border_radius=6,
+                padding=5,
+            ),
             title=ft.Text(
                 title,
-                size=13.5,
+                size=12.5,
                 weight=ft.FontWeight.W_800,
-                color=cfg["text_color"],
+                color="#090D16",
             ),
             controls=sub_buttons,
             initially_expanded=is_open,
             dense=True,
-            tile_padding=ft.padding.symmetric(horizontal=6, vertical=2),
+            tile_padding=ft.padding.symmetric(horizontal=8, vertical=2),
         )
 
     def build_sidebar():
+        """Sidebar porcelaine pure avec logo Themis et pôles institutionnels."""
         b64_logo = get_app_logo_base64()
         logo_widget = ft.Container()
         if b64_logo:
             logo_widget = ft.Container(
-                content=ft.Image(src_base64=b64_logo, width=54, height=54, fit=ft.ImageFit.CONTAIN, border_radius=10),
+                content=ft.Image(src_base64=b64_logo, width=48, height=48, fit=ft.ImageFit.CONTAIN, border_radius=8),
                 alignment=ft.alignment.center,
                 margin=ft.margin.only(bottom=6),
             )
 
         return ft.Container(
             width=275,
-            bgcolor=THEME["sage_pale"],
-            border=ft.border.only(right=ft.BorderSide(1, THEME["sage_light"])),
-            padding=ft.padding.symmetric(horizontal=10, vertical=15),
+            bgcolor="#FFFFFF",
+            border=ft.border.only(right=ft.BorderSide(1, "#CBD5E1")),
+            padding=ft.padding.symmetric(horizontal=12, vertical=16),
             content=ft.Column(
                 controls=[
                     ft.Column([
                         logo_widget,
-                        ft.Text("THEMIS ERP", size=20, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"]),
-                        ft.Text("Gestion Micro-Entreprise & CRM", size=10, color=THEME["text_muted"]),
+                        ft.Text("THEMIS ERP", size=18, weight=ft.FontWeight.W_900, color="#090D16"),
+                        ft.Text("SUITE COMMERCIALE & BANQUE PRIVÉE", size=8.5, weight=ft.FontWeight.W_700, color="#047857"),
                     ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                    ft.Divider(color=THEME["sage_light"], height=16),
-                    nav_sub_btn(ft.icons.DASHBOARD_ROUNDED, "Tableau de bord ERP", "/dashboard", "general"),
-                    nav_sub_btn(ft.icons.MENU_BOOK_ROUNDED, "Manuel & Livret d'Accueil", "/guide", "general"),
-                    ft.Container(height=6),
+                    ft.Divider(color="#E2E8F0", height=20),
+                    
+                    # 1. Pôle Général
+                    nav_sub_btn(ft.icons.DASHBOARD_ROUNDED, "Tableau de Bord", "/dashboard"),
+                    nav_sub_btn(ft.icons.MENU_BOOK_ROUNDED, "Manuel d'Exploitation", "/guide"),
+                    ft.Container(height=4),
+
+                    # 2. Pôle Production & Ingénierie
                     nav_accordion_section(
-                        "Production & Projets", ft.icons.PRECISION_MANUFACTURING_ROUNDED, "production",
+                        "Production & Livrables", ft.icons.PRECISION_MANUFACTURING_ROUNDED,
                         [
-                            nav_sub_btn(ft.icons.VIEW_KANBAN_ROUNDED, "Projets & Kanban (4P)", "/kanban", "production"),
-                            nav_sub_btn(ft.icons.HEALTH_AND_SAFETY_ROUNDED, "Cockpit MCO & Abonnés", "/mco", "production"),
+                            nav_sub_btn(ft.icons.VIEW_KANBAN_ROUNDED, "Projets & Kanban (4P)", "/kanban"),
+                            nav_sub_btn(ft.icons.HEALTH_AND_SAFETY_ROUNDED, "Cockpit MCO & Abonnés", "/mco"),
                         ],
                         is_open=True,
                     ),
+
+                    # 3. Pôle Commercial & CRM
                     nav_accordion_section(
-                        "Commercial & CRM", ft.icons.CONTACTS_ROUNDED, "crm",
+                        "Commercial & Portefeuille", ft.icons.CONTACTS_ROUNDED,
                         [
-                            nav_sub_btn(ft.icons.PEOPLE_ALT_ROUNDED, "Portefeuille & Fiches 360°", "/crm", "crm"),
-                            nav_sub_btn(ft.icons.INVENTORY_2_ROUNDED, "Catalogue Prestations", "/catalogue", "crm"),
-                            nav_sub_btn(ft.icons.DESCRIPTION_ROUNDED, "Créer / Modifier Devis", "/devis", "crm"),
-                            nav_sub_btn(ft.icons.ARCHIVE_ROUNDED, "Archiver / Supprimer", "/archives", "crm"),
+                            nav_sub_btn(ft.icons.PEOPLE_ALT_ROUNDED, "Portefeuille & Fiches 360°", "/crm"),
+                            nav_sub_btn(ft.icons.INVENTORY_2_ROUNDED, "Catalogue Prestations", "/catalogue"),
+                            nav_sub_btn(ft.icons.DESCRIPTION_ROUNDED, "Créer / Modifier Devis", "/devis"),
+                            nav_sub_btn(ft.icons.ARCHIVE_ROUNDED, "Archiver / Supprimer", "/archives"),
                         ],
                         is_open=True,
                     ),
+
+                    # 4. Pôle Facturation & Recouvrement
                     nav_accordion_section(
-                        "Facturation & Contrats", ft.icons.GAVEL_ROUNDED, "facturation",
+                        "Facturation & Contrats", ft.icons.GAVEL_ROUNDED,
                         [
-                            nav_sub_btn(ft.icons.GAVEL_ROUNDED, "Dossier Contractuel (7P)", "/dossier", "facturation"),
-                            nav_sub_btn(ft.icons.POST_ADD_ROUNDED, "Établir Facture / Avoir", "/factures", "facturation"),
-                            nav_sub_btn(ft.icons.RECEIPT_LONG_ROUNDED, "Aperçu & Tampons", "/facturation_print", "facturation"),
+                            nav_sub_btn(ft.icons.GAVEL_ROUNDED, "Dossier Contractuel (7P)", "/dossier"),
+                            nav_sub_btn(ft.icons.POST_ADD_ROUNDED, "Établir Facture / Avoir", "/factures"),
+                            nav_sub_btn(ft.icons.RECEIPT_LONG_ROUNDED, "Aperçu & Factur-X XML", "/facturation_print"),
                         ],
                         is_open=True,
                     ),
+
+                    # 5. Pôle Finance & Réglementaire
                     nav_accordion_section(
-                        "Finance & Fiscalité", ft.icons.ACCOUNT_BALANCE_ROUNDED, "finance",
+                        "Finance & Fiscalité", ft.icons.ACCOUNT_BALANCE_ROUNDED,
                         [
-                            nav_sub_btn(ft.icons.SAVINGS_ROUNDED, "Livre des Recettes (URSSAF)", "/livre_recettes", "finance"),
-                            nav_sub_btn(ft.icons.SHOPPING_BAG_ROUNDED, "Dépenses & Achats", "/depenses", "finance"),
+                            nav_sub_btn(ft.icons.SAVINGS_ROUNDED, "Livre des Recettes (URSSAF)", "/livre_recettes"),
+                            nav_sub_btn(ft.icons.SHOPPING_BAG_ROUNDED, "Registre des Dépenses", "/depenses"),
                         ],
                         is_open=False,
                     ),
-                    ft.Container(height=6),
-                    nav_sub_btn(ft.icons.SETTINGS_ROUNDED, "Paramètres Entreprise", "/settings", "systeme"),
+                    
+                    ft.Container(height=4),
+                    nav_sub_btn(ft.icons.SETTINGS_ROUNDED, "Paramètres & Fiscalité", "/settings"),
                 ],
-                spacing=4,
+                spacing=3,
                 scroll=ft.ScrollMode.AUTO,
             ),
         )
@@ -3917,5 +4294,8 @@ def main(page: ft.Page):
     page.go("/dashboard")
 
 
+# ===========================================================================
+# [POINT DE DÉMARRAGE DE L'APPLICATION]
+# ===========================================================================
 if __name__ == "__main__":
     ft.app(target=main, view=ft.AppView.WEB_BROWSER)
