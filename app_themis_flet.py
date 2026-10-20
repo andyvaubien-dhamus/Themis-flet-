@@ -1,4 +1,6 @@
+import base64
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -6,23 +8,31 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import threading
+import urllib.error
+import urllib.request
 import webbrowser
-import base64
+import xml.etree.ElementTree as ET
 import zipfile
+
 import flet as ft
 import pandas as pd
 
+# Templates contractuels existants
 from contract_templates import (
-    generate_dossier_contractuel_html,
-    text_to_html_list,
+    generate_attestation_conformite_html,
     generate_avenant_flash_html,
+    generate_blueprint_html,
+    generate_dossier_contractuel_html,
+    generate_facturx_xml,
+    generate_livret_accueil_html,
     generate_rapport_mco_html,
     generate_revocation_secrets_html,
-    generate_blueprint_html,
-    generate_livret_accueil_html,
-    generate_attestation_conformite_html,  # <--- NOUVEAU
-    generate_facturx_xml,                 # <--- NOUVEAU 
+    text_to_html_list,
 )
+
+# Nouveau template officiel pour le Chèque TIC Guadeloupe
+from cheque_tic_templates import generate_pack_cheque_tic_html
 
 # ---------------------------------------------------------------------------
 # Chemins sécurisés (Compatible Bureau & Compilation PyInstaller)
@@ -117,6 +127,34 @@ def get_db():
 def init_db():
     conn = get_db()
     cursor = conn.cursor()
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dossiers_cheque_tic (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom_entreprise TEXT NOT NULL,
+            forme_juridique TEXT NOT NULL,
+            siret TEXT UNIQUE NOT NULL,
+            code_naf TEXT,
+            adresse_siege TEXT NOT NULL,
+            commune TEXT NOT NULL,
+            representant_legal TEXT NOT NULL,
+            fonction_signataire TEXT NOT NULL,
+            email_client TEXT NOT NULL,
+            telephone_client TEXT NOT NULL,
+            chiffre_affaires_actuel REAL DEFAULT 0.0,
+            douleur_actuelle TEXT,
+            ambition_12_mois TEXT,
+            budget_web_ht REAL DEFAULT 0.0,
+            budget_securite_ht REAL DEFAULT 0.0,
+            budget_themis_logiciel_ht REAL DEFAULT 0.0,
+            subvention_calculee REAL DEFAULT 0.0,
+            reste_a_charge_ht REAL DEFAULT 0.0,
+            statut_dossier TEXT DEFAULT 'Nouveau',
+            date_mandat TEXT,
+            signature_electronique_validee INTEGER DEFAULT 0,
+            note_impact_redigee TEXT
+        )
+    """)
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS clients (
@@ -263,6 +301,23 @@ def init_db():
             FOREIGN KEY (projet_id) REFERENCES projets (id)
         )
     """)
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS exercices_fiscaux (
+            annee INTEGER PRIMARY KEY,
+            date_cloture TEXT NOT NULL,
+            total_encaisse REAL NOT NULL,
+            total_facture REAL NOT NULL,
+            sha256_archive TEXT NOT NULL
+        )
+    """)
+
+    for col in [
+        "hash_sha256 TEXT", "prev_hash TEXT"
+    ]:
+        try: cursor.execute(f"ALTER TABLE factures ADD COLUMN {col}")
+        except sqlite3.OperationalError: pass
+    
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS avenants (
@@ -1819,6 +1874,593 @@ def view_kanban(page: ft.Page):
         expand=True,
     )
 
+# ===========================================================================
+# MODULE STRATÉGIQUE : CHÈQUE TIC & RÉDACTION IA GEMINI
+# ===========================================================================
+
+def generate_gemini_note_impact(dossier_data: dict, ent_info: dict) -> str:
+    """Appelle l'API Google Gemini avec gemini-flash-latest pour rédiger la note d'impact."""
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    
+    # Clé de secours
+    if not api_key:
+        raise ValueError("Clé API Google Gemini introuvable dans les variables d'environnement.")
+
+    if not api_key:
+        raise ValueError("Clé API Google Gemini introuvable.")
+
+    # Modèle configuré : gemini-flash-latest
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={api_key}"
+
+    prompt = f"""
+Tu es l'analyste économique et technique principal du cabinet {ent_info.get('nom', 'Dhamusoft')}. Tu rédiges la Note d'Impact Stratégique et Numérique officielle soumise aux instructeurs de la Région Guadeloupe et de l'ASP pour l'attribution de la subvention Chèque TIC (Délibération régionale n° CR-19-175 / FEDER).
+
+DONNÉES DU DEMANDEUR :
+- Entreprise : {dossier_data.get('nom_entreprise', '')} ({dossier_data.get('forme_juridique', '')})
+- Commune : {dossier_data.get('commune', 'Guadeloupe')}
+- SIRET : {dossier_data.get('siret', '')} | Code NAF : {dossier_data.get('code_naf', '')}
+- Dirigeant : {dossier_data.get('representant_legal', '')} ({dossier_data.get('fonction_signataire', '')})
+- CA actuel estimé : {float(dossier_data.get('chiffre_affaires_actuel') or 0):,.2f} €
+- Vulnérabilités & blocages opérationnels actuels : {dossier_data.get('douleur_actuelle', '')}
+- Ambition économique à 12 mois : {dossier_data.get('ambition_12_mois', '')}
+
+LE PROGRAMME D'INVESTISSEMENT PRÉVU :
+- Volet 1 (Taux bonifié 80%) : Portail web relation client & plateforme sécurisée ({float(dossier_data.get('budget_web_ht') or 0):,.2f} € HT)
+- Volet 2 (Taux bonifié 80%) : Sécurité des échanges, chiffrement des données & conformité RGPD ({float(dossier_data.get('budget_securite_ht') or 0):,.2f} € HT)
+- Volet 3 (Taux standard 40%) : Déploiement de l'ERP Themis Suite pour automatiser le cycle devis/facturation/suivi ({float(dossier_data.get('budget_themis_logiciel_ht') or 0):,.2f} € HT)
+- Investissement total : {float(dossier_data.get('budget_web_ht') or 0) + float(dossier_data.get('budget_securite_ht') or 0) + float(dossier_data.get('budget_themis_logiciel_ht') or 0):,.2f} € HT
+- Subvention demandée : {float(dossier_data.get('subvention_calculee') or 0):,.2f} €
+
+DIRECTIVES DE RÉDACTION :
+Rédige un document administratif formel, dense, convaincant et chiffré, exempt de tout style promotionnel creux. Tu dois obligatoirement articuler la rédaction selon ces 3 sections réglementaires :
+
+Section 1 : Présentation de l'entreprise et diagnostic de la situation numérique actuelle
+Analyse comment l'absence de numérisation fragilise cette structure à {dossier_data.get('commune', '')}. Démontre l'impact des blocages actuels (perte de temps, risques d'erreurs comptables, perte d'opportunités commerciales face à la concurrence territoriale).
+
+Section 2 : Description détaillée du programme d'investissement
+Détaille les briques logicielles : mise en place de THEMIS ERP (réduction du délai d'émission des devis de 45 minutes à moins de 3 minutes, conformité Art. 286 CGI, signature électronique, coffre-fort de données, intégrité SHA-256). Explique la mise en place de la sauvegarde chiffrée et de la protection des données clients.
+
+Section 3 : Impacts attendus et gains mesurables
+Fournis des métriques probantes : projection d'augmentation de productivité (+25% d'efficacité administrative), impact direct sur le chiffre d'affaires et calendrier d'exécution maîtrisé de 60 jours déployé par {ent_info.get('nom', 'Dhamusoft')}. Justifie pourquoi ce projet coche 100% des critères d'éligibilité du Chèque TIC Guadeloupe.
+"""
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 3000}
+    }
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=35) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+            return res["candidates"][0]["content"]["parts"][0]["text"]
+    except urllib.error.HTTPError as he:
+        err_msg = he.read().decode("utf-8")
+        raise RuntimeError(f"Erreur API Google ({he.code}) : {err_msg}")
+        
+def open_audit_modal(page: ft.Page, dossier_row: dict, on_success_callback):
+    """Ouvre une popup d'audit signalant les faiblesses du dossier pour correction."""
+    did = dossier_row["id"]
+
+    # 1. Champs éditables
+    txt_m_nom = ft.TextField(label="Raison Sociale *", value=dossier_row["nom_entreprise"], expand=True, border_color="#CBD5E1")
+    txt_m_siret = ft.TextField(label="SIRET *", value=dossier_row["siret"], width=180, border_color="#CBD5E1")
+    txt_m_dirigeant = ft.TextField(label="Dirigeant *", value=dossier_row["representant_legal"], expand=True, border_color="#CBD5E1")
+    txt_m_tel = ft.TextField(label="Téléphone", value=dossier_row["telephone_client"], width=160, border_color="#CBD5E1")
+    txt_m_douleur = ft.TextField(label="Points de douleur / Blocages *", value=dossier_row["douleur_actuelle"] or "", multiline=True, min_lines=2, expand=True, border_color="#CBD5E1")
+    txt_m_ambition = ft.TextField(label="Objectifs chiffrés à 12 mois *", value=dossier_row["ambition_12_mois"] or "", multiline=True, min_lines=2, expand=True, border_color="#CBD5E1")
+    
+    txt_m_web = ft.TextField(label="Budget Web HT (€)", value=f"{float(dossier_row['budget_web_ht'] or 0):.2f}", width=150, border_color="#CBD5E1")
+    txt_m_secu = ft.TextField(label="Budget Sécurité HT (€)", value=f"{float(dossier_row['budget_securite_ht'] or 0):.2f}", width=150, border_color="#CBD5E1")
+    txt_m_themis = ft.TextField(label="Budget THEMIS HT (€)", value=f"{float(dossier_row['budget_themis_logiciel_ht'] or 0):.2f}", width=150, border_color="#CBD5E1")
+
+    txt_m_note = ft.TextField(
+        label="Note d'Impact Régionale rédigée (Modifiable)",
+        value=dossier_row["note_impact_redigee"] or "Aucune note rédigée. Cliquez sur la baguette magique pour la générer.",
+        multiline=True, min_lines=5, max_lines=8, text_size=11, expand=True, border_color="#CBD5E1"
+    )
+
+    # 2. Moteur d'Audit automatique (Drapeaux de conformité)
+    alertes = []
+    clean_siret = re.sub(r"\s+", "", str(dossier_row["siret"]))
+    if len(clean_siret) != 14 or not clean_siret.isdigit():
+        alertes.append(ft.Text("⚠️ SIRET non conforme : Doit comporter exactement 14 chiffres.", color="#B91C1C", size=11, weight=ft.FontWeight.BOLD))
+    
+    douleur_txt = (dossier_row["douleur_actuelle"] or "").lower()
+    if len(douleur_txt) < 30:
+        alertes.append(ft.Text("⚠️ Vulnérabilités trop vagues : Précisez les tâches manuelles (ex: devis papier, impayés, etc.).", color="#B45309", size=11))
+
+    ambition_txt = (dossier_row["ambition_12_mois"] or "").lower()
+    if not any(k in ambition_txt for k in ["%", "ca", "recrutement", "embauche", "heures", "marché"]):
+        alertes.append(ft.Text("💡 Conseil Instruction : Ajoutez un objectif chiffré dans l'ambition (+15% de CA, 1 alternant, etc.).", color="#2563EB", size=11))
+
+    subv = float(dossier_row["subvention_calculee"] or 0)
+    if subv < 8000.0:
+        alertes.append(ft.Text(f"💡 Optimisation Financière : Subvention actuelle à {subv:,.2f} € (Plafond possible jusqu'à 10 000 €).", color="#047857", size=11))
+
+    audit_box = ft.Container(
+        content=ft.Column(alertes if alertes else [ft.Text("✅ Dossier optimisé : Tous les indicateurs clés sont conformes.", color="#047857", size=11, weight=ft.FontWeight.BOLD)], spacing=4),
+        bgcolor="#F8FAFC", border=ft.border.all(1, "#CBD5E1"), border_radius=8, padding=10
+    )
+
+    def enregistrer_modifs(e):
+        try:
+            b_w = float(txt_m_web.value.replace(",", ".") or 0)
+            b_s = float(txt_m_secu.value.replace(",", ".") or 0)
+            b_t = float(txt_m_themis.value.replace(",", ".") or 0)
+            tot = b_w + b_s + b_t
+            subv_calc = min((b_w + b_s) * 0.80 + b_t * 0.40, 10000.0)
+            rac_calc = max(tot - subv_calc, 0.0)
+
+            conn = get_db()
+            conn.cursor().execute(
+                """
+                UPDATE dossiers_cheque_tic SET
+                    nom_entreprise=?, siret=?, representant_legal=?, telephone_client=?,
+                    douleur_actuelle=?, ambition_12_mois=?, budget_web_ht=?, budget_securite_ht=?,
+                    budget_themis_logiciel_ht=?, subvention_calculee=?, reste_a_charge_ht=?, note_impact_redigee=?
+                WHERE id=?
+                """,
+                (
+                    txt_m_nom.value.strip(), txt_m_siret.value.strip().replace(" ", ""),
+                    txt_m_dirigeant.value.strip(), txt_m_tel.value.strip(),
+                    txt_m_douleur.value.strip(), txt_m_ambition.value.strip(),
+                    b_w, b_s, b_t, subv_calc, rac_calc, txt_m_note.value.strip(), did
+                )
+            )
+            conn.commit()
+            conn.close()
+
+            show_toast(page, "Dossier mis à jour avec succès !")
+            close_dialog(dlg)
+            on_success_callback()
+        except Exception as ex:
+            show_toast(page, f"Erreur de sauvegarde : {ex}", is_error=True)
+
+    def close_dialog(d):
+        if hasattr(page, "close"): page.close(d)
+        else:
+            d.open = False
+            page.update()
+
+    dlg = ft.AlertDialog(
+        title=ft.Row([
+            ft.Icon(ft.icons.RATE_REVIEW_ROUNDED, color="#047857", size=20),
+            ft.Text(f"AUDIT & ÉDITION • {dossier_row['nom_entreprise']}", size=14, weight=ft.FontWeight.W_900),
+        ], spacing=8),
+        content=ft.Container(
+            content=ft.Column([
+                ft.Text("DIAGNOSTIC AUTOMATIQUE DU DOSSIER :", size=10, weight=ft.FontWeight.BOLD, color="#64748B"),
+                audit_box,
+                ft.Row([txt_m_nom, txt_m_siret]),
+                ft.Row([txt_m_dirigeant, txt_m_tel]),
+                txt_m_douleur,
+                txt_m_ambition,
+                ft.Row([txt_m_web, txt_m_secu, txt_m_themis]),
+                txt_m_note,
+            ], spacing=10, scroll=ft.ScrollMode.AUTO),
+            width=700, height=480, padding=10
+        ),
+        actions=[
+            ft.TextButton("Annuler", on_click=lambda e: close_dialog(dlg)),
+            ft.ElevatedButton("Valider les modifications", icon=ft.icons.SAVE_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, on_click=enregistrer_modifs),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+    if hasattr(page, "open"): page.open(dlg)
+    else:
+        page.dialog = dlg
+        dlg.open = True
+        page.update()        
+
+
+def view_cheque_tic(page: ft.Page):
+    ent = get_entreprise_info()
+    URL_GOOGLE_SHEETS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRl2qDcWIVyAftkGNT4BXef6QMfTSjc9AwHrnCfJ8695x7NzF4Kf7oBALR38R_sqOoCn43GFqqHy5G5/pub?output=csv"
+
+    communes_guadeloupe = [
+        "Abymes", "Anse-Bertrand", "Baie-Mahault", "Baillif", "Basse-Terre", "Bouillante",
+        "Capesterre-Belle-Eau", "Capesterre-de-Marie-Galante", "Deshaies", "Gourbeyre",
+        "Goyave", "Grand-Bourg", "La Désirade", "Lamentin", "Morne-à-l'Eau", "Le Moule",
+        "Petit-Bourg", "Petit-Canal", "Pointe-à-Pitre", "Pointe-Noire", "Port-Louis",
+        "Saint-Claude", "Saint-François", "Saint-Louis", "Sainte-Anne", "Sainte-Rose",
+        "Terre-de-Bas", "Terre-de-Haut", "Trois-Rivières", "Vieux-Fort", "Vieux-Habitants"
+    ]
+
+    # 1. Champs Saisie Rapide
+    txt_nom_ent = ft.TextField(label="Raison Sociale / Société *", expand=True, border_color="#CBD5E1")
+    dd_forme = ft.Dropdown(
+        label="Forme Juridique *",
+        options=[ft.dropdown.Option(f) for f in ["SARL", "SAS", "SASU", "Micro-entreprise", "EI", "EURL"]],
+        value="SARL", width=160, border_color="#CBD5E1"
+    )
+    txt_siret = ft.TextField(label="N° SIRET (14 chiffres) *", width=200, border_color="#CBD5E1")
+    txt_naf = ft.TextField(label="Code NAF", width=120, value="6201Z", border_color="#CBD5E1")
+    dd_commune = ft.Dropdown(
+        label="Commune (Guadeloupe) *",
+        options=[ft.dropdown.Option(c) for c in communes_guadeloupe],
+        value="Baie-Mahault", width=220, border_color="#CBD5E1"
+    )
+    txt_adresse = ft.TextField(label="Adresse du siège *", expand=True, border_color="#CBD5E1")
+    txt_dirigeant = ft.TextField(label="Nom & Prénom Dirigeant *", expand=True, border_color="#CBD5E1")
+    txt_fonction = ft.TextField(label="Qualité *", value="Gérant", width=160, border_color="#CBD5E1")
+    txt_email = ft.TextField(label="Email *", expand=True, border_color="#CBD5E1")
+    txt_tel = ft.TextField(label="Téléphone *", width=160, border_color="#CBD5E1")
+    txt_ca = ft.TextField(label="CA Estimé (€)", value="65000", width=150, border_color="#CBD5E1")
+
+    txt_douleur = ft.TextField(
+        label="Blocage opérationnel / Douleur actuelle *",
+        value="Émission manuelle des devis sur papier le week-end, relances des impayés tardives, perte récurrente de données.",
+        multiline=True, min_lines=2, expand=True, border_color="#CBD5E1"
+    )
+    txt_ambition = ft.TextField(
+        label="Objectif d'évolution à 12 mois *",
+        value="Hausse de 20% du CA, recrutement d'un alternant et gain de 8 heures par semaine sur l'administratif.",
+        multiline=True, min_lines=2, expand=True, border_color="#CBD5E1"
+    )
+
+    # 2. Simulateur Financier Chèque TIC
+    txt_b_web = ft.TextField(label="Budget Web HT (€)", value="3200.00", width=180, border_color="#CBD5E1")
+    txt_b_secu = ft.TextField(label="Budget Sécurité HT (€)", value="1800.00", width=180, border_color="#CBD5E1")
+    txt_b_themis = ft.TextField(label="Budget ERP THEMIS HT (€)", value="2800.00", width=180, border_color="#CBD5E1")
+
+    lbl_calc_subv = ft.Text("0.00 €", size=20, weight=ft.FontWeight.W_900, color="#047857")
+    lbl_calc_rac = ft.Text("0.00 €", size=20, weight=ft.FontWeight.W_900, color="#090D16")
+    lbl_calc_total = ft.Text("0.00 € HT", size=13, weight=ft.FontWeight.BOLD, color="#475569")
+
+    def recalculer_plan_financier():
+        try:
+            b_web = float(txt_b_web.value.replace(",", ".") or 0)
+            b_secu = float(txt_b_secu.value.replace(",", ".") or 0)
+            b_themis = float(txt_b_themis.value.replace(",", ".") or 0)
+        except ValueError:
+            return 0.0, 0.0, 0.0
+            
+        tot = b_web + b_secu + b_themis
+        subv_80 = (b_web + b_secu) * 0.80
+        subv_40 = b_themis * 0.40
+        subv_totale = min(subv_80 + subv_40, 10000.00)
+        rac = max(tot - subv_totale, 0.0)
+
+        lbl_calc_subv.value = f"{subv_totale:,.2f} €"
+        lbl_calc_rac.value = f"{rac:,.2f} € HT"
+        lbl_calc_total.value = f"Investissement Global : {tot:,.2f} € HT"
+        return tot, subv_totale, rac
+
+    def on_budget_change(e):
+        recalculer_plan_financier()
+        page.update()
+
+    txt_b_web.on_change = on_budget_change
+    txt_b_secu.on_change = on_budget_change
+    txt_b_themis.on_change = on_budget_change
+    recalculer_plan_financier()
+
+    # 3. Actions d'Impression et Génération IA
+    table_container = ft.Container()
+    txt_search = ft.TextField(label="🔍 Filtrer par Raison Sociale, SIRET ou Commune", expand=True, border_color="#CBD5E1")
+
+    def print_dossier_pack(dossier_id: int):
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM dossiers_cheque_tic WHERE id = ?", (dossier_id,))
+        row = dict(c.fetchone())
+        conn.close()
+
+        if not row.get("note_impact_redigee"):
+            show_toast(page, "Générez d'abord la Note d'Impact par IA avant d'imprimer le pack !", is_error=True)
+            return
+
+        html = generate_pack_cheque_tic_html(row, ent)
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html", encoding="utf-8") as tf:
+            tf.write(html)
+            temp_path = tf.name
+
+        webbrowser.open(f"file://{temp_path}")
+        show_toast(page, f"Pack Officiel Chèque TIC généré pour {row['nom_entreprise']}.")
+
+    def execute_ia_generation(dossier_id: int):
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM dossiers_cheque_tic WHERE id = ?", (dossier_id,))
+        row = dict(c.fetchone())
+        conn.close()
+
+        show_toast(page, "⏳ Rédaction en cours par l'IA Gemini... Veuillez patienter.")
+
+        def run_thread():
+            try:
+                texte_redige = generate_gemini_note_impact(row, ent)
+                conn_up = get_db()
+                conn_up.cursor().execute(
+                    "UPDATE dossiers_cheque_tic SET note_impact_redigee = ? WHERE id = ?",
+                    (texte_redige, dossier_id)
+                )
+                conn_up.commit()
+                conn_up.close()
+
+                def open_success_dialog():
+                    dlg_pret = ft.AlertDialog(
+                        title=ft.Row([
+                            ft.Icon(ft.icons.CHECK_CIRCLE_ROUNDED, color="#047857", size=22),
+                            ft.Text("NOTE D'IMPACT VALIDÉE !", size=14, weight=ft.FontWeight.W_900),
+                        ], spacing=8),
+                        content=ft.Text(f"La Note d'Impact pour {row['nom_entreprise']} est prête. Le Pack de 5 pages peut être imprimé.", size=12),
+                        actions=[
+                            ft.TextButton("Plus tard", on_click=lambda e: close_dlg(dlg_pret)),
+                            ft.ElevatedButton(
+                                "🖨️ Imprimer Maintenant (PDF)",
+                                icon=ft.icons.PRINT_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE,
+                                on_click=lambda e: (close_dlg(dlg_pret), print_dossier_pack(dossier_id))
+                            ),
+                        ],
+                    )
+                    def close_dlg(d):
+                        if hasattr(page, "close"): page.close(d)
+                        else:
+                            d.open = False
+                            page.update()
+
+                    if hasattr(page, "open"): page.open(dlg_pret)
+                    else:
+                        page.dialog = dlg_pret
+                        dlg_pret.open = True
+                        page.update()
+
+                open_success_dialog()
+                show_toast(page, f"✅ Note d'impact prête pour {row['nom_entreprise']} !")
+                load_dossiers_table()
+
+            except Exception as ex:
+                show_toast(page, f"Erreur IA : {str(ex)}", is_error=True)
+
+        threading.Thread(target=run_thread, daemon=True).start()
+
+    # 4. Chargement du Tableau Sans Rognage
+    def load_dossiers_table(filtre=""):
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM dossiers_cheque_tic ORDER BY id DESC")
+        all_d = [dict(r) for r in c.fetchall()]
+        conn.close()
+
+        if filtre.strip():
+            f_low = filtre.strip().lower()
+            filtered = [r for r in all_d if f_low in r["nom_entreprise"].lower() or f_low in r["siret"] or f_low in r["commune"].lower()]
+        else:
+            filtered = all_d
+
+        rows = []
+        for d in filtered:
+            did = d["id"]
+            has_note = bool(d["note_impact_redigee"])
+            is_from_web = ("Web" in (d["statut_dossier"] or ""))
+
+            badge_ia = ft.Container(
+                content=ft.Text("Prêt ✅" if has_note else "Note ⚠️", size=9.5, weight=ft.FontWeight.W_800, color="#047857" if has_note else "#B45309"),
+                bgcolor="#ECFDF5" if has_note else "#FEF3C7",
+                border=ft.border.all(1, "#A7F3D0" if has_note else "#FDE68A"),
+                padding=ft.padding.symmetric(horizontal=6, vertical=2),
+                border_radius=4,
+            )
+
+            badge_source = ft.Container(
+                content=ft.Text("🌐 Web" if is_from_web else "📝 Direct", size=9, weight=ft.FontWeight.BOLD, color="#1E40AF" if is_from_web else "#475569"),
+                bgcolor="#EFF6FF" if is_from_web else "#F1F5F9",
+                padding=ft.padding.symmetric(horizontal=4, vertical=2),
+                border_radius=4,
+            )
+
+            rows.append(
+                ft.DataRow(cells=[
+                    ft.DataCell(ft.Container(
+                        content=ft.Column([
+                            ft.Text(d["nom_entreprise"], weight=ft.FontWeight.W_800, size=12),
+                            ft.Row([ft.Text(f"{d['commune']} • {d['siret']}", size=10, color="#64748B"), badge_source], spacing=4),
+                        ], spacing=1, alignment=ft.MainAxisAlignment.CENTER),
+                        width=240
+                    )),
+                    ft.DataCell(ft.Container(content=ft.Text(f"{d['representant_legal']}\n{d['telephone_client']}", size=11), width=150)),
+                    ft.DataCell(ft.Container(content=ft.Text(f"{float(d['subvention_calculee']):,.2f} €", weight=ft.FontWeight.W_900, color="#047857", size=11.5), width=100)),
+                    ft.DataCell(ft.Container(content=ft.Text(f"{float(d['reste_a_charge_ht']):,.2f} €", weight=ft.FontWeight.BOLD, size=11), width=90)),
+                    ft.DataCell(ft.Container(content=badge_ia, width=70)),
+                    ft.DataCell(ft.Container(
+                        content=ft.Row([
+                            ft.IconButton(icon=ft.icons.AUTO_AWESOME_ROUNDED, icon_size=18, tooltip="Générer Note IA", icon_color="#047857", on_click=lambda e, i=did: execute_ia_generation(i)),
+                            ft.IconButton(icon=ft.icons.EDIT_NOTE_ROUNDED, icon_size=18, tooltip="Auditer & Modifier", icon_color="#2563EB", on_click=lambda e, row=d: open_audit_modal(page, row, lambda: load_dossiers_table(txt_search.value))),
+                            ft.IconButton(icon=ft.icons.PRINT_ROUNDED, icon_size=18, tooltip="Imprimer Pack 5P", icon_color="#05231A" if has_note else "#CBD5E1", disabled=not has_note, on_click=lambda e, i=did: print_dossier_pack(i)),
+                        ], spacing=0),
+                        width=120
+                    )),
+                ])
+            )
+
+        table_dt = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("Entreprise & SIRET", weight=ft.FontWeight.BOLD, size=11)),
+                ft.DataColumn(ft.Text("Dirigeant", weight=ft.FontWeight.BOLD, size=11)),
+                ft.DataColumn(ft.Text("Aide Région", weight=ft.FontWeight.BOLD, size=11)),
+                ft.DataColumn(ft.Text("Reste Charge", weight=ft.FontWeight.BOLD, size=11)),
+                ft.DataColumn(ft.Text("Statut", weight=ft.FontWeight.BOLD, size=11)),
+                ft.DataColumn(ft.Text("Actions", weight=ft.FontWeight.BOLD, size=11)),
+            ],
+            rows=rows,
+            heading_row_color="#F8FAFC",
+            border=ft.border.all(1, "#CBD5E1"),
+            border_radius=8,
+            column_spacing=12,
+        )
+
+        # Enveloppe avec défilement adaptatif (zéro rognage)
+        table_container.content = ft.Row([table_dt], scroll=ft.ScrollMode.ADAPTIVE)
+        page.update()
+
+    txt_search.on_change = lambda e: load_dossiers_table(txt_search.value)
+
+    # 5. Synchronisation Google Sheets
+    def synchroniser_mandats_google_sheets(e):
+        show_toast(page, "Synchronisation des mandats en ligne...")
+        def run_sync():
+            try:
+                df_web = pd.read_csv(URL_GOOGLE_SHEETS_CSV)
+                if df_web.empty: return
+                conn = get_db()
+                cursor = conn.cursor()
+                nouveaux = 0
+                for _, row in df_web.iterrows():
+                    siret_brut = str(row.get("SIRET", "")).replace(" ", "").replace(".0", "").strip()
+                    nom_ste = str(row.get("Entreprise", "")).strip()
+                    if not siret_brut or not nom_ste or siret_brut == "nan": continue
+
+                    cursor.execute("SELECT id FROM dossiers_cheque_tic WHERE siret = ?", (siret_brut,))
+                    if not cursor.fetchone():
+                        b_w, b_s, b_t = 3200.0, 1800.0, 2800.0
+                        tot = b_w + b_s + b_t
+                        subv = min((b_w + b_s) * 0.80 + b_t * 0.40, 10000.0)
+                        rac = max(tot - subv, 0.0)
+                        cursor.execute(
+                            """
+                            INSERT INTO dossiers_cheque_tic (
+                                nom_entreprise, forme_juridique, siret, code_naf, adresse_siege, commune,
+                                representant_legal, fonction_signataire, email_client, telephone_client,
+                                chiffre_affaires_actuel, douleur_actuelle, ambition_12_mois,
+                                budget_web_ht, budget_securite_ht, budget_themis_logiciel_ht,
+                                subvention_calculee, reste_a_charge_ht, statut_dossier, date_mandat, signature_electronique_validee
+                            ) VALUES (?, ?, ?, '6201Z', ?, ?, ?, ?, ?, ?, 65000.0, 
+                                      'Émission manuelle des devis, relances tardives, manque d''automatisation.',
+                                      'Hausse de 20% du CA, mise aux normes et gain de productivité.',
+                                      ?, ?, ?, ?, ?, 'Mandat Signé (Web)', ?, 1)
+                            """,
+                            (nom_ste, str(row.get("Forme", "SARL")), siret_brut, str(row.get("Adresse", "")),
+                             str(row.get("Commune", "Baie-Mahault")), str(row.get("Dirigeant", "")),
+                             str(row.get("Fonction", "Gérant")), str(row.get("Email", "")), str(row.get("Téléphone", "")),
+                             b_w, b_s, b_t, subv, rac, str(row.get("Date Signature", str(datetime.date.today()))))
+                        )
+                        nouveaux += 1
+                conn.commit()
+                conn.close()
+                show_toast(page, f"✅ {nouveaux} mandat(s) synchronisé(s) !" if nouveaux > 0 else "Dossiers déjà à jour.")
+                load_dossiers_table()
+            except Exception as ex:
+                show_toast(page, f"Erreur sync : {ex}", is_error=True)
+        threading.Thread(target=run_sync, daemon=True).start()
+
+    btn_refresh = ft.IconButton(
+        icon=ft.icons.SYNC_ROUNDED, icon_color="#047857", tooltip="Actualiser depuis Google Sheets",
+        on_click=synchroniser_mandats_google_sheets
+    )
+
+    badge_passerelle = ft.Container(
+        content=ft.Row([
+            ft.Container(width=8, height=8, bgcolor="#10B981", border_radius=4),
+            ft.Text("Passerelle Active", size=10, weight=ft.FontWeight.BOLD, color="#047857")
+        ], spacing=6),
+        bgcolor="#ECFDF5", padding=ft.padding.symmetric(horizontal=8, vertical=4),
+        border_radius=6, border=ft.border.all(1, "#A7F3D0")
+    )
+
+    def enregistrer_nouveau_dossier(e):
+        if not txt_nom_ent.value.strip() or not txt_siret.value.strip() or not txt_dirigeant.value.strip():
+            show_toast(page, "Champs obligatoires manquants (*).", is_error=True)
+            return
+        tot, subv, rac = recalculer_plan_financier()
+        conn = get_db()
+        try:
+            conn.cursor().execute(
+                """
+                INSERT INTO dossiers_cheque_tic (
+                    nom_entreprise, forme_juridique, siret, code_naf, adresse_siege, commune,
+                    representant_legal, fonction_signataire, email_client, telephone_client,
+                    chiffre_affaires_actuel, douleur_actuelle, ambition_12_mois,
+                    budget_web_ht, budget_securite_ht, budget_themis_logiciel_ht,
+                    subvention_calculee, reste_a_charge_ht, statut_dossier, date_mandat, signature_electronique_validee
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Saisie Directe', ?, 1)
+                """,
+                (
+                    txt_nom_ent.value.strip(), dd_forme.value, txt_siret.value.strip().replace(" ", ""),
+                    txt_naf.value.strip().upper(), txt_adresse.value.strip(), dd_commune.value,
+                    txt_dirigeant.value.strip(), txt_fonction.value.strip(), txt_email.value.strip(),
+                    txt_tel.value.strip(), float(txt_ca.value.replace(",", ".") or 0),
+                    txt_douleur.value.strip(), txt_ambition.value.strip(),
+                    float(txt_b_web.value.replace(",", ".") or 0), float(txt_b_secu.value.replace(",", ".") or 0),
+                    float(txt_b_themis.value.replace(",", ".") or 0), subv, rac, str(datetime.date.today())
+                )
+            )
+            conn.commit()
+            conn.close()
+            show_toast(page, f"Dossier {txt_nom_ent.value} enregistré !")
+            txt_nom_ent.value, txt_siret.value, txt_dirigeant.value, txt_email.value, txt_tel.value = "", "", "", "", ""
+            load_dossiers_table()
+        except sqlite3.IntegrityError:
+            conn.close()
+            show_toast(page, f"Ce SIRET {txt_siret.value} existe déjà.", is_error=True)
+
+    load_dossiers_table()
+
+    # Formulaire de Création dans une carte
+    form_card = create_card(
+        ft.Column([
+            ft.Row([
+                ft.Icon(ft.icons.POST_ADD_ROUNDED, color="#047857", size=18),
+                ft.Text("FORMULAIRE DE QUALIFICATION D'APPEL DIRECT", size=12.5, weight=ft.FontWeight.W_900),
+            ], spacing=6),
+            ft.Divider(height=10, color="#E2E8F0"),
+            ft.Row([txt_nom_ent, dd_forme, txt_siret, txt_naf]),
+            ft.Row([dd_commune, txt_adresse]),
+            ft.Row([txt_dirigeant, txt_fonction, txt_email, txt_tel]),
+            ft.Row([txt_ca, txt_douleur]),
+            txt_ambition,
+            ft.Divider(height=10, color="#E2E8F0"),
+            ft.Text("PLAN FINANCIER & SIMULATION CHÈQUE TIC :", size=11, weight=ft.FontWeight.W_800, color="#05231A"),
+            ft.Row([txt_b_web, txt_b_secu, txt_b_themis]),
+            ft.Container(
+                content=ft.Row([
+                    ft.Column([ft.Text("AIDE RÉGION (80%/40%)", size=9.5, weight=ft.FontWeight.BOLD, color="#64748B"), lbl_calc_subv]),
+                    ft.Column([ft.Text("RESTE À CHARGE HT", size=9.5, weight=ft.FontWeight.BOLD, color="#64748B"), lbl_calc_rac]),
+                    ft.Column([ft.Text("TOTAL INVESTISSEMENT", size=9.5, weight=ft.FontWeight.BOLD, color="#64748B"), lbl_calc_total]),
+                ], alignment=ft.MainAxisAlignment.SPACE_AROUND),
+                bgcolor="#F8FAFC", border=ft.border.all(1, "#CBD5E1"), border_radius=6, padding=10,
+            ),
+            ft.ElevatedButton("Enregistrer le dossier", icon=ft.icons.SAVE_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=42, on_click=enregistrer_nouveau_dossier),
+        ], spacing=10),
+        padding=16,
+    )
+
+    return ft.ListView(
+        controls=[
+            create_header("REG.01", "DOSSIERS CHÈQUE TIC & RÉDACTION IA", "ACCOMPAGNEMENT RÉGIONAL • SUBVENTION FEDER GUADELOUPE (JUSQU'À 80 %)"),
+            ft.ExpansionTile(
+                leading=ft.Container(content=ft.Icon(ft.icons.ADD_MODERATOR_ROUNDED, color="#047857", size=18), bgcolor="#ECFDF5", padding=6, border_radius=6),
+                title=ft.Text("Enregistrer un nouveau prospect éligible (Mandat d'instruction)", size=13, weight=ft.FontWeight.W_800),
+                controls=[form_card],
+                initially_expanded=False,
+            ),
+            ft.Container(height=12),
+            create_card(
+                ft.Column([
+                    ft.Row([txt_search, badge_passerelle, btn_refresh], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    table_container,
+                ], spacing=12),
+                padding=14,
+            ),
+            build_footer(),
+        ],
+        spacing=10,
+        expand=True,
+    )
+
+# ===========================================================================
+# SUITE EXISTANTE DU FICHIER : def view_crm_clients(page: ft.Page): ...
+# ===========================================================================    
 
 # --- 3. MODULE CRM & FICHE CLIENT 360° AVEC MODAL POPUP ---
 def view_crm_clients(page: ft.Page):
@@ -2250,29 +2892,289 @@ def view_crm_clients(page: ft.Page):
 
 # --- 4. MODULE CATALOGUE ---
 def view_catalogue(page: ft.Page):
-    conn = get_db()
-    df_cat = pd.read_sql_query("SELECT * FROM catalogue ORDER BY id DESC", conn)
-    conn.close()
+    table_cat_container = ft.Container()
 
-    cat_rows = [
-        ft.DataRow(cells=[
-            ft.DataCell(ft.Text(r["reference"], weight=ft.FontWeight.BOLD)),
-            ft.DataCell(ft.Text(r["designation"])),
-            ft.DataCell(ft.Container(content=ft.Text(r["type_service"], size=11, color=THEME["sage_dark"], weight=ft.FontWeight.BOLD), bgcolor=THEME["sage_pale"], padding=4, border_radius=6)),
-            ft.DataCell(ft.Text(f"{float(r['prix_unitaire_ht']):.2f} €")),
-        ])
-        for _, r in df_cat.iterrows()
-    ]
-
-    table_cat = ft.DataTable(
-        columns=[ft.DataColumn(ft.Text("Réf.")), ft.DataColumn(ft.Text("Désignation")), ft.DataColumn(ft.Text("Type")), ft.DataColumn(ft.Text("Prix Unit. HT"))],
-        rows=cat_rows, heading_row_color=THEME["sage_pale"], border=ft.border.all(1, THEME["sage_light"]), border_radius=8,
+    # Formulaire d'ajout direct d'une nouvelle offre
+    txt_new_ref = ft.TextField(label="Référence unique (ex: AUTO-CST-01, SRV-AUDIT) *", width=260, border_color="#CBD5E1")
+    txt_new_desig = ft.TextField(label="Désignation commerciale de la prestation *", expand=True, border_color="#CBD5E1")
+    dd_new_type = ft.Dropdown(
+        label="Type de service *",
+        options=[ft.dropdown.Option(t) for t in TYPES_CATALOGUE],
+        value=TYPES_CATALOGUE[0],
+        width=240,
+        border_color="#CBD5E1",
     )
+    txt_new_prix = ft.TextField(label="Prix Unitaire HT (€) *", width=180, border_color="#CBD5E1")
+    txt_new_desc = ft.TextField(label="Description technique et étendue de la prestation", expand=True, multiline=True, min_lines=2, border_color="#CBD5E1")
+
+    def open_edit_modal(item_row):
+        """Ouvre une popup pour modifier une prestation existante."""
+        item_id = item_row["id"]
+        ref_val = item_row["reference"]
+
+        txt_edit_desig = ft.TextField(label="Désignation commerciale *", value=item_row["designation"], expand=True, border_color="#CBD5E1")
+        dd_edit_type = ft.Dropdown(
+            label="Type de service *",
+            options=[ft.dropdown.Option(t) for t in TYPES_CATALOGUE],
+            value=item_row["type_service"] if item_row["type_service"] in TYPES_CATALOGUE else TYPES_CATALOGUE[0],
+            width=260,
+            border_color="#CBD5E1",
+        )
+        txt_edit_prix = ft.TextField(label="Tarif Unitaire HT (€) *", value=f"{float(item_row['prix_unitaire_ht']):.2f}", width=180, border_color="#CBD5E1")
+        txt_edit_desc = ft.TextField(label="Description & Périmètre technique", value=item_row["description"] or "", expand=True, multiline=True, min_lines=3, border_color="#CBD5E1")
+
+        def save_changes(e):
+            desig = txt_edit_desig.value.strip()
+            if not desig:
+                show_toast(page, "La désignation ne peut pas être vide.", is_error=True)
+                return
+            try:
+                p_val = float(txt_edit_prix.value.replace(",", "."))
+            except ValueError:
+                show_toast(page, "Tarif numérique invalide.", is_error=True)
+                return
+
+            conn_up = get_db()
+            cursor_up = conn_up.cursor()
+            cursor_up.execute(
+                """
+                UPDATE catalogue 
+                SET designation=?, type_service=?, prix_unitaire_ht=?, description=?
+                WHERE id=?
+                """,
+                (desig, dd_edit_type.value, p_val, txt_edit_desc.value.strip(), item_id)
+            )
+            conn_up.commit()
+            conn_up.close()
+
+            show_toast(page, f"Prestation {ref_val} mise à jour avec succès !")
+            close_edit_dlg(dlg_edit)
+            refresh_catalogue_table()
+
+        def close_edit_dlg(d):
+            if hasattr(page, "close"): page.close(d)
+            else:
+                d.open = False
+                page.update()
+
+        dlg_edit = ft.AlertDialog(
+            title=ft.Row([
+                ft.Container(
+                    content=ft.Icon(ft.icons.EDIT_NOTE_ROUNDED, color="#A7F3D0", size=18),
+                    bgcolor="#0B382A",
+                    padding=6,
+                    border_radius=6,
+                ),
+                ft.Text(f"MODIFIER L'OFFRE • {ref_val}", size=15, weight=ft.FontWeight.W_900, color="#FFFFFF"),
+            ], spacing=10),
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Text(f"Référence officielle : {ref_val} (Non modifiable)", size=11, color="#64748B", weight=ft.FontWeight.BOLD),
+                    txt_edit_desig,
+                    ft.Row([dd_edit_type, txt_edit_prix]),
+                    txt_edit_desc,
+                ], spacing=12, scroll=ft.ScrollMode.AUTO),
+                width=620,
+                height=360,
+                padding=10,
+            ),
+            actions=[
+                ft.TextButton("Annuler", on_click=lambda e: close_edit_dlg(dlg_edit)),
+                ft.ElevatedButton("Enregistrer les modifications", icon=ft.icons.SAVE_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=44, on_click=save_changes),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        if hasattr(page, "open"): page.open(dlg_edit)
+        else:
+            page.dialog = dlg_edit
+            dlg_edit.open = True
+            page.update()
+
+    def refresh_catalogue_table():
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM catalogue ORDER BY id DESC")
+        items = cursor.fetchall()
+        conn.close()
+
+        cat_rows = []
+        for r in items:
+            item_id = r["id"]
+            type_srv = r["type_service"]
+            row_data = dict(r)
+            
+            # Badges de typologie de service
+            if "Abonnement" in type_srv:
+                badge_bg, badge_color = "#ECFDF5", "#047857"
+            elif "Setup" in type_srv or "Création" in type_srv:
+                badge_bg, badge_color = "#EFF6FF", "#1D4ED8"
+            elif "Maintenance" in type_srv:
+                badge_bg, badge_color = "#F5F3FF", "#6D28D9"
+            else:
+                badge_bg, badge_color = "#F1F5F9", "#475569"
+
+            cat_rows.append(
+                ft.DataRow(cells=[
+                    ft.DataCell(
+                        ft.Container(
+                            content=ft.Text(r["reference"], weight=ft.FontWeight.W_900, color="#090D16", size=11.5),
+                            width=120,
+                        )
+                    ),
+                    ft.DataCell(
+                        ft.Container(
+                            content=ft.Column([
+                                ft.Text(r["designation"], weight=ft.FontWeight.W_800, color="#090D16", size=12.5, no_wrap=False),
+                                ft.Text(r["description"] or "Aucune précision technique renseignée.", size=11, color="#64748B", italic=True, no_wrap=False),
+                            ], spacing=4, alignment=ft.MainAxisAlignment.CENTER),
+                            width=390,
+                            padding=ft.padding.symmetric(vertical=8),
+                        )
+                    ),
+                    ft.DataCell(
+                        ft.Container(
+                            content=ft.Container(
+                                content=ft.Text(type_srv, size=10, color=badge_color, weight=ft.FontWeight.BOLD),
+                                bgcolor=badge_bg,
+                                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                                border_radius=6,
+                            ),
+                            width=140,
+                            alignment=ft.alignment.center_left,
+                        )
+                    ),
+                    ft.DataCell(
+                        ft.Container(
+                            content=ft.Text(f"{float(r['prix_unitaire_ht']):,.2f} € HT", weight=ft.FontWeight.W_900, color="#05231A", size=12),
+                            width=110,
+                            alignment=ft.alignment.center_right,
+                        )
+                    ),
+                    ft.DataCell(
+                        ft.Container(
+                            content=ft.Row([
+                                ft.IconButton(
+                                    icon=ft.icons.EDIT_OUTLINED,
+                                    icon_size=18,
+                                    icon_color="#047857",
+                                    tooltip="Modifier cette offre",
+                                    on_click=lambda e, item=row_data: open_edit_modal(item)
+                                ),
+                                ft.IconButton(
+                                    icon=ft.icons.DELETE_OUTLINE,
+                                    icon_size=18,
+                                    icon_color="#94A3B8",
+                                    tooltip="Supprimer du catalogue",
+                                    on_click=lambda e, sid=item_id: delete_catalogue_item(sid)
+                                ),
+                            ], spacing=2, alignment=ft.MainAxisAlignment.CENTER),
+                            width=80,
+                            alignment=ft.alignment.center,
+                        )
+                    ),
+                ])
+            )
+
+        table_cat = ft.DataTable(
+            columns=[
+                ft.DataColumn(ft.Text("Réf. Offre", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Désignation & Périmètre Inclus", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Typologie", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Tarif Unitaire", weight=ft.FontWeight.BOLD)),
+                ft.DataColumn(ft.Text("Actions", weight=ft.FontWeight.BOLD)),
+            ],
+            rows=cat_rows,
+            heading_row_color="#F8FAFC",
+            border=ft.border.all(1, "#CBD5E1"),
+            border_radius=8,
+            data_row_min_height=65,
+            data_row_max_height=float("inf"),
+            column_spacing=20,
+        )
+
+        table_cat_container.content = ft.Row([table_cat], scroll=ft.ScrollMode.AUTO)
+        page.update()
+
+    def add_new_service(e):
+        ref_val = txt_new_ref.value.strip().upper()
+        desig_val = txt_new_desig.value.strip()
+        if not ref_val or not desig_val:
+            show_toast(page, "La référence et la désignation sont obligatoires.", is_error=True)
+            return
+
+        try:
+            prix_val = float(txt_new_prix.value.replace(",", "."))
+        except ValueError:
+            show_toast(page, "Le tarif doit être une valeur numérique valide.", is_error=True)
+            return
+
+        conn = get_db()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                INSERT INTO catalogue (reference, designation, type_service, prix_unitaire_ht, description)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (ref_val, desig_val, dd_new_type.value, prix_val, txt_new_desc.value.strip())
+            )
+            conn.commit()
+            conn.close()
+
+            # Nettoyage des champs
+            txt_new_ref.value = ""
+            txt_new_desig.value = ""
+            txt_new_prix.value = ""
+            txt_new_desc.value = ""
+
+            show_toast(page, f"Prestation {ref_val} ajoutée avec succès au catalogue !")
+            refresh_catalogue_table()
+        except sqlite3.IntegrityError:
+            conn.close()
+            show_toast(page, f"La référence {ref_val} existe déjà dans votre catalogue.", is_error=True)
+
+    def delete_catalogue_item(sid):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM catalogue WHERE id = ?", (sid,))
+        conn.commit()
+        conn.close()
+        show_toast(page, "Prestation retirée du catalogue.")
+        refresh_catalogue_table()
+
+    refresh_catalogue_table()
 
     return ft.ListView(
         controls=[
-            create_header("📦", "Catalogue Prestations & Tarifs", "Répertoire officiel des 8 forfaits standards Themis"),
-            create_card(table_cat, padding=16),
+            create_header("CAT.01", "CATALOGUE DES PRESTATIONS & FORFAITS", "RÉPERTOIRE OFFICIEL • TARIFICATION, ABONNEMENTS & GESTION DES OFFRES"),
+            create_card(
+                ft.ExpansionTile(
+                    leading=ft.Container(
+                        content=ft.Icon(ft.icons.ADD_BOX_ROUNDED, color="#05231A", size=18),
+                        bgcolor="#F1F5F9",
+                        padding=6,
+                        border_radius=6,
+                    ),
+                    title=ft.Text("Créer une nouvelle prestation dans le catalogue (Sans toucher au code)", size=13.5, weight=ft.FontWeight.W_800, color="#090D16"),
+                    controls=[
+                        ft.Container(
+                            content=ft.Column([
+                                ft.Row([txt_new_ref, txt_new_desig]),
+                                ft.Row([dd_new_type, txt_new_prix]),
+                                txt_new_desc,
+                                ft.ElevatedButton("Enregistrer au Catalogue", icon=ft.icons.SAVE_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=44, on_click=add_new_service),
+                            ], spacing=12),
+                            padding=16,
+                        )
+                    ],
+                    initially_expanded=False,
+                ),
+                padding=12,
+            ),
+            ft.Container(height=14),
+            create_card(table_cat_container, padding=16),
             build_footer(),
         ],
         spacing=10,
@@ -2292,18 +3194,18 @@ def view_devis_form(page: ft.Page):
     current_devis_num = get_next_devis()
     selected_client_id = None
 
-    txt_num = ft.TextField(label="N° Devis", value=current_devis_num, read_only=True, bgcolor=THEME["sage_pale"], width=220)
-    txt_date = ft.TextField(label="Date (AAAA-MM-JJ)", value=str(datetime.date.today()), width=200)
+    txt_num = ft.TextField(label="N° Devis", value=current_devis_num, read_only=True, bgcolor="#F8FAFC", width=220, border_color="#CBD5E1")
+    txt_date = ft.TextField(label="Date (AAAA-MM-JJ)", value=str(datetime.date.today()), width=200, border_color="#CBD5E1")
 
-    txt_societe = ft.TextField(label="Société", expand=True)
-    txt_nom = ft.TextField(label="Nom contact", width=220)
-    txt_prenom = ft.TextField(label="Prénom", width=220)
-    txt_adresse = ft.TextField(label="Adresse", multiline=True, min_lines=2)
-    txt_tel = ft.TextField(label="Tél", width=220)
-    txt_email = ft.TextField(label="Email", width=220)
+    txt_societe = ft.TextField(label="Raison Sociale / Société", expand=True, border_color="#CBD5E1")
+    txt_nom = ft.TextField(label="Nom du contact *", width=220, border_color="#CBD5E1")
+    txt_prenom = ft.TextField(label="Prénom", width=220, border_color="#CBD5E1")
+    txt_adresse = ft.TextField(label="Adresse postale complète", multiline=True, min_lines=2, border_color="#CBD5E1")
+    txt_tel = ft.TextField(label="Téléphone", width=220, border_color="#CBD5E1")
+    txt_email = ft.TextField(label="Email de facturation", width=220, border_color="#CBD5E1")
 
     client_options = [ft.dropdown.Option(key=str(r["id"]), text=f"{r['societe'] or r['nom']} ({r['email']})") for _, r in clients_df.iterrows()]
-    dd_client_crm = ft.Dropdown(label="⚡ Sélectionner Client CRM :", options=client_options, width=420)
+    dd_client_crm = ft.Dropdown(label="⚡ Sélectionner un Client du Portefeuille :", options=client_options, width=420, border_color="#CBD5E1")
 
     def on_c_pick(e):
         nonlocal selected_client_id
@@ -2317,13 +3219,13 @@ def view_devis_form(page: ft.Page):
 
     devis_lignes = [{"designation": "Forfait Automatisation Métier — Flux Multi-étapes & Routage Conditionnel", "qte": 1, "prix_setup": 490.0, "prix_abo": 0.0}]
     lignes_container = ft.Column(spacing=10)
-    lbl_tot_setup = ft.Text("0.00 €", size=18, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"])
-    lbl_tot_abo = ft.Text("0.00 € / mois", size=18, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"])
-    slider_acompte = ft.Slider(min=0, max=50, divisions=10, value=30, label="{value}%")
+    lbl_tot_setup = ft.Text("0.00 € HT", size=22, weight=ft.FontWeight.W_900, color="#05231A")
+    lbl_tot_abo = ft.Text("0.00 € HT / mois", size=22, weight=ft.FontWeight.W_900, color="#047857")
+    slider_acompte = ft.Slider(min=0, max=50, divisions=10, value=30, label="{value}%", active_color="#047857")
 
-    txt_roi_heures = ft.TextField(label="Heures économisées / semaine pour le client", value="4.0", width=250)
-    txt_roi_taux = ft.TextField(label="Coût horaire moyen client (€/h)", value="25.0", width=220)
-    lbl_roi_summary = ft.Text("Gain annuel estimé : 5 200,00 € HT / an  |  Amorti en 4.9 semaines", weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800)
+    txt_roi_heures = ft.TextField(label="Heures économisées / semaine pour le client", value="4.0", width=250, border_color="#CBD5E1")
+    txt_roi_taux = ft.TextField(label="Coût horaire moyen client (€/h)", value="25.0", width=220, border_color="#CBD5E1")
+    lbl_roi_summary = ft.Text("Gain annuel estimé : 5 200,00 € HT / an  |  Amorti en 4.9 semaines", weight=ft.FontWeight.BOLD, color="#047857", size=12)
 
     def compute_totals():
         tot_s, tot_a = 0.0, 0.0
@@ -2336,14 +3238,14 @@ def view_devis_form(page: ft.Page):
 
     def update_financials():
         tot_s, tot_a = compute_totals()
-        lbl_tot_setup.value = f"{tot_s:.2f} € HT"
-        lbl_tot_abo.value = f"{tot_a:.2f} € HT / mois"
+        lbl_tot_setup.value = f"{tot_s:,.2f} € HT"
+        lbl_tot_abo.value = f"{tot_a:,.2f} € HT / mois"
         try:
             h = float(txt_roi_heures.value.replace(",", "."))
             tx = float(txt_roi_taux.value.replace(",", "."))
             gain = h * 52 * tx
             amort = (tot_s / (h * tx)) if (h * tx) > 0 else 0
-            lbl_roi_summary.value = f"Gain annuel client : {gain:,.2f} € HT / an  |  Amorti en {amort:.1f} semaines"
+            lbl_roi_summary.value = f"Gain annuel client : {gain:,.2f} € HT / an  |  Investissement amorti en {amort:.1f} semaines"
         except Exception: pass
         page.update()
 
@@ -2353,10 +3255,10 @@ def view_devis_form(page: ft.Page):
     def refresh_lignes():
         lignes_container.controls.clear()
         for idx, lig in enumerate(devis_lignes):
-            t_desig = ft.TextField(label="Désignation", value=lig["designation"], expand=True)
-            t_qte = ft.TextField(label="Qté", value=str(lig["qte"]), width=60)
-            t_setup = ft.TextField(label="Setup HT", value=f"{float(lig['prix_setup']):.2f}", width=120)
-            t_abo = ft.TextField(label="Abo Mensuel", value=f"{float(lig['prix_abo']):.2f}", width=120)
+            t_desig = ft.TextField(label="Désignation de la prestation", value=lig["designation"], expand=True, border_color="#CBD5E1")
+            t_qte = ft.TextField(label="Qté", value=str(lig["qte"]), width=60, border_color="#CBD5E1")
+            t_setup = ft.TextField(label="Setup HT (€)", value=f"{float(lig['prix_setup']):.2f}", width=120, border_color="#CBD5E1")
+            t_abo = ft.TextField(label="Abo Mensuel (€)", value=f"{float(lig['prix_abo']):.2f}", width=130, border_color="#CBD5E1")
 
             def b_d(e, i=idx): devis_lignes[i]["designation"] = e.control.value
             def b_q(e, i=idx):
@@ -2383,8 +3285,8 @@ def view_devis_form(page: ft.Page):
 
             lignes_container.controls.append(
                 ft.Container(
-                    bgcolor=THEME["sage_pale"], border_radius=8, padding=6,
-                    content=ft.Row([t_desig, t_qte, t_setup, t_abo, ft.IconButton(icon=ft.icons.DELETE_OUTLINE, on_click=rem)]),
+                    bgcolor="#F8FAFC", border=ft.border.all(1, "#E2E8F0"), border_radius=8, padding=10,
+                    content=ft.Row([t_desig, t_qte, t_setup, t_abo, ft.IconButton(icon=ft.icons.DELETE_OUTLINE, icon_color="#B91C1C", on_click=rem)]),
                 )
             )
         update_financials()
@@ -2393,6 +3295,7 @@ def view_devis_form(page: ft.Page):
         label="Insérer une prestation du catalogue :",
         options=[ft.dropdown.Option(key=str(r["id"]), text=f"{r['reference']} — {r['designation']} ({r['prix_unitaire_ht']:.2f} € HT)") for _, r in catalogue_df.iterrows()],
         expand=True,
+        border_color="#CBD5E1",
     )
 
     def add_from_cat(e):
@@ -2442,6 +3345,7 @@ def view_devis_form(page: ft.Page):
         options=[ft.dropdown.Option(key=row["numero_devis"], text=f"{row['numero_devis']} ({row['client_societe'] or row['client_nom'] or 'Particulier'})") for _, row in devis_existants.iterrows()],
         on_change=load_devis,
         width=450,
+        border_color="#CBD5E1",
     )
 
     def save_devis(e):
@@ -2494,31 +3398,39 @@ def view_devis_form(page: ft.Page):
 
     return ft.ListView(
         controls=[
-            create_header("✒️", "Devis & Commandes", "Création, modification et calcul de rentabilité ROI"),
+            create_header("DEV.01", "DEVIS & PROPOSITIONS COMMERCIALES", "INGÉNIERIE COMMERCIALE • CHIFFRAGE MULTI-LIGNES & CALCUL DU ROI CLIENT"),
             create_card(selector_edit),
             ft.Container(height=10),
             create_card(
                 ft.Column([
-                    ft.Text("1. Client & Coordonnées", weight=ft.FontWeight.BOLD, size=15),
+                    ft.Text("1. Client & Coordonnées de Facturation", weight=ft.FontWeight.W_800, size=13.5, color="#090D16"),
                     dd_client_crm,
                     ft.Row([txt_societe, txt_nom, txt_prenom]),
                     txt_adresse,
-                    ft.Divider(height=20),
-                    ft.Text("2. Prestations & Abonnements Cumulés", weight=ft.FontWeight.BOLD, size=15),
-                    ft.Row([cat_dd, ft.ElevatedButton("Ajouter", icon=ft.icons.ADD_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=add_from_cat)]),
+                    ft.Row([txt_tel, txt_email]),
+                    ft.Divider(height=20, color="#CBD5E1"),
+                    ft.Text("2. Prestations & Abonnements Récurrents", weight=ft.FontWeight.W_800, size=13.5, color="#090D16"),
+                    ft.Row([cat_dd, ft.ElevatedButton("Insérer", icon=ft.icons.ADD_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, on_click=add_from_cat)]),
                     lignes_container,
-                    ft.Divider(height=20),
-                    ft.Text("3. Rentabilité & Économies Estimées (ROI Client)", weight=ft.FontWeight.BOLD, size=14),
+                    ft.Divider(height=20, color="#CBD5E1"),
+                    ft.Text("3. Rentabilité & Économies Estimées (ROI Client)", weight=ft.FontWeight.W_800, size=13.5, color="#090D16"),
                     ft.Row([txt_roi_heures, txt_roi_taux]),
-                    lbl_roi_summary,
-                    ft.Divider(height=20),
+                    ft.Container(
+                        content=lbl_roi_summary,
+                        bgcolor="#ECFDF5",
+                        border=ft.border.all(1, "#10B981"),
+                        border_radius=8,
+                        padding=12,
+                    ),
+                    ft.Divider(height=20, color="#CBD5E1"),
                     ft.Row([
-                        ft.Column([ft.Text("TOTAL CRÉATION :", size=10, weight=ft.FontWeight.BOLD), lbl_tot_setup]),
+                        ft.Column([ft.Text("TOTAL FRAIS DE CRÉATION :", size=10, weight=ft.FontWeight.BOLD, color="#64748B"), lbl_tot_setup]),
                         ft.Container(width=40),
-                        ft.Column([ft.Text("TOTAL ABONNEMENT :", size=10, weight=ft.FontWeight.BOLD), lbl_tot_abo]),
+                        ft.Column([ft.Text("TOTAL ABONNEMENTS RÉCURRENTS :", size=10, weight=ft.FontWeight.BOLD, color="#64748B"), lbl_tot_abo]),
                     ]),
+                    ft.Text("Exigence de l'acompte à la commande :", size=11, color="#64748B", weight=ft.FontWeight.BOLD),
                     slider_acompte,
-                    ft.ElevatedButton("💾 Enregistrer le Devis", icon=ft.icons.SAVE_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, height=50, on_click=save_devis),
+                    ft.ElevatedButton("Enregistrer le Devis Officiel", icon=ft.icons.SAVE_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=48, on_click=save_devis),
                 ], spacing=14)
             ),
             build_footer(),
@@ -2692,64 +3604,130 @@ def view_archives(page: ft.Page):
     conn = get_db()
     df_actifs = pd.read_sql_query("SELECT numero_devis, client_societe FROM devis WHERE archive = 0 ORDER BY id DESC", conn)
     df_archives = pd.read_sql_query("SELECT * FROM devis WHERE archive = 1 ORDER BY id DESC", conn)
+    ent = get_entreprise_info()
     conn.close()
 
     warning_box_archive = ft.Container(visible=False)
-    dd_archive = ft.Dropdown(label="Devis actif à archiver", options=[ft.dropdown.Option(str(d)) for d in df_actifs["numero_devis"].tolist()], width=300)
+    dd_archive = ft.Dropdown(label="Devis actif à archiver :", options=[ft.dropdown.Option(str(d)) for d in df_actifs["numero_devis"].tolist()], width=320, border_color="#CBD5E1")
 
     def on_select_archive(e):
         if not dd_archive.value:
             warning_box_archive.visible = False
             page.update()
             return
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM factures WHERE numero_devis = ?", (dd_archive.value,))
-        count = cursor.fetchone()[0]
-        conn.close()
+        conn_chk = get_db()
+        cursor_chk = conn_chk.cursor()
+        cursor_chk.execute("SELECT COUNT(*) FROM factures WHERE numero_devis = ?", (dd_archive.value,))
+        count = cursor_chk.fetchone()[0]
+        conn_chk.close()
         if count > 0:
-            warning_box_archive.content = ft.Container(content=ft.Text(f"ℹ️ {count} facture(s) liée(s) à ce devis. L'archivage est autorisé.", size=12), bgcolor=THEME["blush_pale"], padding=8, border_radius=6)
+            warning_box_archive.content = ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.icons.INFO_OUTLINE, color="#B45309", size=18),
+                    ft.Text(f"Notice : {count} facture(s) rattachée(s) à ce devis. L'archivage est autorisé mais la traçabilité est maintenue.", size=11.5, color="#92400E", weight=ft.FontWeight.W_600),
+                ], spacing=8),
+                bgcolor="#FEF3C7",
+                border=ft.border.all(1, "#FDE68A"),
+                padding=10,
+                border_radius=8
+            )
             warning_box_archive.visible = True
-        else: warning_box_archive.visible = False
+        else:
+            warning_box_archive.visible = False
         page.update()
 
     dd_archive.on_change = on_select_archive
-    dd_statut_archive = ft.Dropdown(label="Statut appliqué", options=[ft.dropdown.Option(s) for s in ["Refusé", "Annulé", "Sans suite", "Autre"]], value="Refusé", width=200)
-    txt_motif = ft.TextField(label="Précisions complémentaires", expand=True)
+    dd_statut_archive = ft.Dropdown(
+        label="Statut appliqué :",
+        options=[ft.dropdown.Option(s) for s in ["Refusé", "Annulé", "Sans suite", "Autre"]],
+        value="Refusé",
+        width=220,
+        border_color="#CBD5E1"
+    )
+    txt_motif = ft.TextField(label="Motif ou observations complémentaires", expand=True, border_color="#CBD5E1")
 
     def do_archive(e):
         if not dd_archive.value: return
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE devis SET archive = 1, statut = ?, motif_archivage = ? WHERE numero_devis = ?", (dd_statut_archive.value or "Annulé", txt_motif.value.strip(), dd_archive.value))
-        conn.commit()
-        conn.close()
-        show_toast(page, f"Devis {dd_archive.value} archivé.")
+        conn_arch = get_db()
+        cursor_arch = conn_arch.cursor()
+        cursor_arch.execute("UPDATE devis SET archive = 1, statut = ?, motif_archivage = ? WHERE numero_devis = ?", (dd_statut_archive.value or "Annulé", txt_motif.value.strip(), dd_archive.value))
+        conn_arch.commit()
+        conn_arch.close()
+        show_toast(page, f"Devis {dd_archive.value} mis en sommeil dans les archives.")
         page.go("/archives")
 
-    dd_restaure = ft.Dropdown(label="Sélectionner un devis archivé", options=[ft.dropdown.Option(str(d)) for d in df_archives["numero_devis"].tolist()], width=350)
-    info_restaure = ft.Text("", italic=True)
-    btn_delete = ft.OutlinedButton("Supprimer définitivement", icon=ft.icons.DELETE_FOREVER_ROUNDED, disabled=True)
-    chk_confirm = ft.Checkbox(label="Je confirme vouloir supprimer définitivement ce devis (action irréversible)", value=False, disabled=True)
+    dd_restaure = ft.Dropdown(label="Sélectionner une pièce archivée :", options=[ft.dropdown.Option(str(d)) for d in df_archives["numero_devis"].tolist()], width=380, border_color="#CBD5E1")
+    info_restaure_container = ft.Container(visible=False)
+    btn_delete = ft.OutlinedButton("Purger définitivement", icon=ft.icons.DELETE_FOREVER_ROUNDED, disabled=True, style=ft.ButtonStyle(color="#B91C1C", side=ft.BorderSide(1, "#B91C1C")))
+    btn_print_archived = ft.ElevatedButton("Consulter le Dossier (7P)", icon=ft.icons.VISIBILITY_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, height=44, disabled=True)
+    chk_confirm = ft.Checkbox(label="Je confirme vouloir purger définitivement ce devis (action irréversible)", value=False, disabled=True)
+
+    def print_archived_devis(e):
+        if not dd_restaure.value: return
+        conn_p = get_db()
+        conn_p.row_factory = sqlite3.Row
+        cursor_p = conn_p.cursor()
+        cursor_p.execute("SELECT * FROM devis WHERE numero_devis = ?", (dd_restaure.value,))
+        d = cursor_p.fetchone()
+        conn_p.close()
+
+        if not d:
+            show_toast(page, "Devis archivé introuvable.", is_error=True)
+            return
+
+        try:
+            html = generate_dossier_contractuel_html(d, ent)
+            with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html", encoding="utf-8") as tf:
+                tf.write(html)
+                temp_path = tf.name
+
+            webbrowser.open(f"file://{temp_path}")
+            show_toast(page, f"Dossier contractuel archivé (7P) ouvert pour {dd_restaure.value}.")
+        except Exception as ex:
+            show_toast(page, f"Erreur lors de l'ouverture : {str(ex)}", is_error=True)
+
+    btn_print_archived.on_click = print_archived_devis
 
     def on_select_restaure(e):
-        if not dd_restaure.value: return
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT client_societe, statut, motif_archivage FROM devis WHERE numero_devis = ?", (dd_restaure.value,))
-        d_info = cursor.fetchone()
-        cursor.execute("SELECT COUNT(*) FROM factures WHERE numero_devis = ?", (dd_restaure.value,))
-        nb_fac = cursor.fetchone()[0]
-        conn.close()
+        if not dd_restaure.value:
+            info_restaure_container.visible = False
+            btn_print_archived.disabled = True
+            page.update()
+            return
+        conn_r = get_db()
+        cursor_r = conn_r.cursor()
+        cursor_r.execute("SELECT client_societe, statut, motif_archivage FROM devis WHERE numero_devis = ?", (dd_restaure.value,))
+        d_info = cursor_r.fetchone()
+        cursor_r.execute("SELECT COUNT(*) FROM factures WHERE numero_devis = ?", (dd_restaure.value,))
+        nb_fac = cursor_r.fetchone()[0]
+        conn_r.close()
 
-        info_restaure.value = f"Client : {d_info[0] or 'Particulier'} — Statut : {d_info[1]}"
+        btn_print_archived.disabled = False
+
         if nb_fac > 0:
             chk_confirm.disabled = True
             btn_delete.disabled = True
-            show_toast(page, f"Suppression bloquée : {nb_fac} facture(s) rattachée(s).", is_error=True)
+            info_restaure_container.content = ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.icons.LOCK_ROUNDED, color="#B91C1C", size=20),
+                    ft.Text(f"SUPPRESSION VERROUILLÉE : {nb_fac} facture(s) officielle(s) rattachée(s). La purge est interdite (Art. 286 CGI), mais vous pouvez consulter le devis ci-dessous.", size=11.5, color="#7F1D1D", weight=ft.FontWeight.BOLD),
+                ], spacing=8),
+                bgcolor="#FEF2F2",
+                border=ft.border.all(1, "#FCA5A5"),
+                padding=12,
+                border_radius=8
+            )
         else:
             chk_confirm.disabled = False
             btn_delete.disabled = True
+            info_restaure_container.content = ft.Container(
+                content=ft.Text(f"Compte : {d_info[0] or 'Particulier'} | Statut archivé : {d_info[1]} | Motif : {d_info[2] or 'Non précisé'}", size=12, color="#05231A", weight=ft.FontWeight.W_600),
+                bgcolor="#F8FAFC",
+                border=ft.border.all(1, "#CBD5E1"),
+                padding=10,
+                border_radius=8
+            )
+        info_restaure_container.visible = True
         page.update()
 
     dd_restaure.on_change = on_select_restaure
@@ -2757,45 +3735,53 @@ def view_archives(page: ft.Page):
 
     def do_restore(e):
         if not dd_restaure.value: return
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE devis SET archive = 0 WHERE numero_devis = ?", (dd_restaure.value,))
-        conn.commit()
-        conn.close()
-        show_toast(page, f"Devis {dd_restaure.value} restauré.")
+        conn_res = get_db()
+        cursor_res = conn_res.cursor()
+        cursor_res.execute("UPDATE devis SET archive = 0 WHERE numero_devis = ?", (dd_restaure.value,))
+        conn_res.commit()
+        conn_res.close()
+        show_toast(page, f"Devis {dd_restaure.value} réactivé dans le portefeuille commercial.")
         page.go("/archives")
 
     def do_delete(e):
         if not dd_restaure.value or not chk_confirm.value: return
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM devis WHERE numero_devis = ?", (dd_restaure.value,))
-        conn.commit()
-        conn.close()
-        show_toast(page, "Devis supprimé définitivement.")
+        conn_del = get_db()
+        cursor_del = conn_del.cursor()
+        cursor_del.execute("DELETE FROM devis WHERE numero_devis = ?", (dd_restaure.value,))
+        conn_del.commit()
+        conn_del.close()
+        show_toast(page, "Devis définitivement purgé.")
         page.go("/archives")
 
     btn_delete.on_click = do_delete
 
     return ft.ListView(
         controls=[
-            create_header("🗃️", "Archives & Sécurité", "Mise en sommeil et protection de la comptabilité"),
+            create_header("ARC.01", "ARCHIVES & SÉCURITÉ COMPTABLE", "MISE EN SOMMEIL • CONSERVATION LÉGALE & PROTECTION DES PIÈCES"),
             create_card(
-                ft.Column(controls=[
-                    ft.Text("📦 Archiver un devis actif", weight=ft.FontWeight.BOLD, size=15),
+                ft.Column([
+                    ft.Text("Mettre un devis actif en sommeil (Archivage sécurisé)", weight=ft.FontWeight.W_800, size=13.5, color="#090D16"),
                     warning_box_archive,
                     ft.Row([dd_archive, dd_statut_archive]),
                     txt_motif,
-                    ft.ElevatedButton("Archiver", icon=ft.icons.ARCHIVE_ROUNDED, bgcolor=THEME["blush_dark"], color=ft.colors.WHITE, on_click=do_archive),
-                ], spacing=14)
+                    ft.ElevatedButton("Archiver la pièce", icon=ft.icons.ARCHIVE_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, height=44, on_click=do_archive),
+                ], spacing=14),
+                padding=20,
             ),
-            ft.Container(height=20),
+            ft.Container(height=16),
             create_card(
-                ft.Column(controls=[
-                    ft.Text("♻️ Restaurer ou Supprimer définitivement", weight=ft.FontWeight.BOLD, size=15),
-                    dd_restaure, info_restaure, chk_confirm,
-                    ft.Row(controls=[ft.ElevatedButton("Restaurer ce devis", icon=ft.icons.RESTORE_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=do_restore), btn_delete]),
-                ], spacing=14)
+                ft.Column([
+                    ft.Text("Consulter, Restaurer ou Purger une pièce archivée", weight=ft.FontWeight.W_800, size=13.5, color="#090D16"),
+                    dd_restaure,
+                    info_restaure_container,
+                    chk_confirm,
+                    ft.Row([
+                        btn_print_archived,
+                        ft.ElevatedButton("Restaurer ce devis", icon=ft.icons.RESTORE_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=44, on_click=do_restore),
+                        btn_delete,
+                    ], spacing=12),
+                ], spacing=14),
+                padding=20,
             ),
             build_footer(),
         ],
@@ -2916,19 +3902,39 @@ def view_factures(page: ft.Page):
         if not dd_create_devis.value: return
         try: m_val = float(txt_create_montant.value.replace(",", "."))
         except ValueError: return
+
+        # 1. Contrôle du verrouillage temporel d'exercice clos (Art. 286 CGI)
+        try:
+            annee_facture = int(txt_create_date_f.value.strip().split("-")[0])
+        except Exception:
+            annee_facture = datetime.date.today().year
+
         conn = get_db()
         cursor = conn.cursor()
+        cursor.execute("SELECT annee FROM exercices_fiscaux WHERE annee = ?", (annee_facture,))
+        if cursor.fetchone():
+            conn.close()
+            show_toast(page, f"ÉMISSION BLOQUÉE : L'exercice fiscal {annee_facture} est formellement clôturé et inaltérable.", is_error=True)
+            return
+
+        # 2. Scellement cryptographique SHA-256 en chaîne
+        cursor.execute("SELECT hash_sha256 FROM factures WHERE hash_sha256 IS NOT NULL ORDER BY id DESC LIMIT 1")
+        last_row = cursor.fetchone()
+        prev_hash = last_row[0] if last_row and last_row[0] else "THEMIS-GENESIS-SEAL"
+        empreinte_source = f"{prev_hash}|{txt_create_num.value}|{dd_create_devis.value}|{txt_create_date_f.value.strip()}|{m_val:.2f}"
+        curr_hash = hashlib.sha256(empreinte_source.encode("utf-8")).hexdigest()
+
         try:
             cursor.execute(
                 """
-                INSERT INTO factures (numero_facture, numero_devis, type_facture, date_facture, date_echeance, montant_ht, statut)
-                VALUES (?, ?, ?, ?, ?, ?, 'Facture Émise')
+                INSERT INTO factures (numero_facture, numero_devis, type_facture, date_facture, date_echeance, montant_ht, statut, prev_hash, hash_sha256)
+                VALUES (?, ?, ?, ?, ?, ?, 'Facture Émise', ?, ?)
                 """,
-                (txt_create_num.value, dd_create_devis.value, dd_create_type.value, txt_create_date_f.value.strip(), txt_create_date_e.value.strip(), m_val),
+                (txt_create_num.value, dd_create_devis.value, dd_create_type.value, txt_create_date_f.value.strip(), txt_create_date_e.value.strip(), m_val, prev_hash, curr_hash),
             )
             conn.commit()
             conn.close()
-            show_toast(page, f"Facture officielle {txt_create_num.value} établie avec succès !")
+            show_toast(page, f"Facture {txt_create_num.value} scellée cryptographiquement (SHA-256) !")
             page.go("/facturation_print")
         except sqlite3.IntegrityError:
             conn.close()
@@ -2941,7 +3947,7 @@ def view_factures(page: ft.Page):
             ft.Row([dd_create_devis, dd_create_type, txt_abo_mois]),
             ft.Row([txt_create_num, txt_create_montant]),
             ft.Row([txt_create_date_f, txt_create_date_e]),
-            ft.ElevatedButton("Émettre la facture officielle", icon=ft.icons.RECEIPT_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=46, on_click=do_create_facture),
+            ft.ElevatedButton("Émettre et sceller la facture officielle", icon=ft.icons.RECEIPT_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=46, on_click=do_create_facture),
         ], spacing=16)
     else:
         form_create_view = ft.Container(
@@ -2967,11 +3973,26 @@ def view_factures(page: ft.Page):
             border_radius=10,
         )
 
-    dd_edit_fact = ft.Dropdown(label="Sélectionner la facture à corriger", options=[ft.dropdown.Option(str(f)) for f in df_fact["numero_facture"].tolist()], width=450)
-    txt_edit_date_f = ft.TextField(label="Date d'émission", width=200)
-    txt_edit_date_e = ft.TextField(label="Date d'échéance", width=200)
-    txt_edit_montant = ft.TextField(label="Montant H.T. corrigé (€)", width=220)
-    dd_edit_statut = ft.Dropdown(label="Statut", options=[ft.dropdown.Option(s) for s in STATUTS_FACTURES], width=250)
+    # Mode 2 : Mise à jour conforme Art. 286 CGI
+    dd_edit_fact = ft.Dropdown(label="Sélectionner la facture à mettre à jour :", options=[ft.dropdown.Option(str(f)) for f in df_fact["numero_facture"].tolist()], width=450, border_color="#CBD5E1")
+    txt_edit_date_f = ft.TextField(label="Date d'émission (Inaltérable - Art. 286 CGI)", width=240, read_only=True, bgcolor="#F8FAFC", border_color="#CBD5E1")
+    txt_edit_montant = ft.TextField(label="Montant H.T. émis (Inaltérable - Art. 286 CGI)", width=240, read_only=True, bgcolor="#F8FAFC", border_color="#CBD5E1")
+    txt_edit_date_e = ft.TextField(label="Date d'échéance accordée (Modifiable)", width=220, border_color="#CBD5E1")
+    dd_edit_statut = ft.Dropdown(label="Statut comptable", options=[ft.dropdown.Option(s) for s in STATUTS_FACTURES], width=250, border_color="#CBD5E1")
+
+    legal_notice_edit = ft.Container(
+        content=ft.Row([
+            ft.Icon(ft.icons.GAVEL_ROUNDED, color="#05231A", size=20),
+            ft.Column([
+                ft.Text("CONFORMITÉ FISCALE STRICTE (ARTICLE 286 DU CGI)", size=11, weight=ft.FontWeight.W_900, color="#05231A"),
+                ft.Text("La date d'émission et le montant d'une facture émise sont strictement inaltérables. Pour rectifier un montant, vous devez émettre une facture d'Avoir dans l'onglet '3. Émettre un Avoir'.", size=11, color="#475569"),
+            ], spacing=2, expand=True),
+        ], spacing=10),
+        bgcolor="#F1F5F9",
+        border=ft.border.all(1, "#CBD5E1"),
+        padding=12,
+        border_radius=8,
+    )
 
     def on_edit_fact_select(e):
         if not dd_edit_fact.value: return
@@ -2981,7 +4002,7 @@ def view_factures(page: ft.Page):
         row = cursor.fetchone()
         conn.close()
         if row:
-            txt_edit_date_f.value, txt_edit_date_e.value, txt_edit_montant.value = str(row[0]), str(row[1]), f"{float(row[2]):.2f}"
+            txt_edit_date_f.value, txt_edit_date_e.value, txt_edit_montant.value = str(row[0]), str(row[1]), f"{float(row[2]):.2f} € HT"
             st = row[3] if row[3] in STATUTS_FACTURES else ("Facture Acquittée" if row[3] == "Payée" else "Facture Émise")
             dd_edit_statut.value = st
             page.update()
@@ -2990,27 +4011,51 @@ def view_factures(page: ft.Page):
 
     def save_correction(e):
         if not dd_edit_fact.value: return
-        try: m_val = float(txt_edit_montant.value.replace(",", "."))
-        except ValueError: return
         conn = get_db()
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("UPDATE factures SET date_facture=?, date_echeance=?, montant_ht=?, statut=? WHERE numero_facture=?", (txt_edit_date_f.value.strip(), txt_edit_date_e.value.strip(), m_val, dd_edit_statut.value, dd_edit_fact.value))
+        cursor.execute("UPDATE factures SET date_echeance=?, statut=? WHERE numero_facture=?", (txt_edit_date_e.value.strip(), dd_edit_statut.value, dd_edit_fact.value))
+
+        if dd_edit_statut.value == "Facture Acquittée":
+            cursor.execute("SELECT * FROM paiements WHERE numero_facture = ?", (dd_edit_fact.value,))
+            if not cursor.fetchone():
+                cursor.execute(
+                    """
+                    SELECT f.montant_ht, d.client_societe, d.client_nom, d.client_prenom, f.type_facture
+                    FROM factures f JOIN devis d ON f.numero_devis = d.numero_devis
+                    WHERE f.numero_facture = ?
+                    """,
+                    (dd_edit_fact.value,)
+                )
+                fd = cursor.fetchone()
+                if fd:
+                    c_name = fd[1] or f"{fd[3]} {fd[2]}"
+                    cursor.execute(
+                        "INSERT INTO paiements (numero_facture, date_paiement, client_nom, nature_prestation, montant_recu, mode_paiement, reference_reglement) VALUES (?, ?, ?, ?, ?, 'Virement bancaire', 'Règlement client direct')",
+                        (dd_edit_fact.value, str(datetime.date.today()), c_name, fd[4], float(fd[0]))
+                    )
+        else:
+            cursor.execute("DELETE FROM paiements WHERE numero_facture = ?", (dd_edit_fact.value,))
+
         conn.commit()
         conn.close()
-        show_toast(page, "Correction enregistrée !")
+        show_toast(page, f"Échéance et statut actualisés dans le respect strict de l'Art. 286 du CGI.")
         page.go("/facturation_print")
 
     form_edit_view = ft.Column(controls=[
-        ft.Text("Modifier ou corriger une facture existante", size=14, weight=ft.FontWeight.W_800, color="#090D16"),
-        dd_edit_fact, ft.Row([txt_edit_date_f, txt_edit_date_e]), ft.Row([txt_edit_montant, dd_edit_statut]),
-        ft.ElevatedButton("Enregistrer la correction", icon=ft.icons.SAVE_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, height=44, on_click=save_correction),
-    ], spacing=16)
+        ft.Text("Mise à jour d'échéance et statut de facture", size=14, weight=ft.FontWeight.W_800, color="#090D16"),
+        legal_notice_edit,
+        dd_edit_fact, 
+        ft.Row([txt_edit_date_f, txt_edit_montant]),
+        ft.Row([txt_edit_date_e, dd_edit_statut]),
+        ft.ElevatedButton("Valider la mise à jour légale", icon=ft.icons.CHECK_CIRCLE_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, height=44, on_click=save_correction),
+    ], spacing=14)
 
-    dd_fact_orig = ft.Dropdown(label="Facture d'origine à créditer *", options=[ft.dropdown.Option(str(f)) for f in df_fact["numero_facture"].tolist()], width=450)
+    dd_fact_orig = ft.Dropdown(label="Facture d'origine à créditer *", options=[ft.dropdown.Option(str(f)) for f in df_fact["numero_facture"].tolist()], width=450, border_color="#CBD5E1")
     lbl_orig_info = ft.Text("", italic=True)
-    txt_motif_avoir = ft.TextField(label="Motif obligatoire de l'avoir * (ex: Annulation, Erreur de calcul...)", expand=True)
-    txt_montant_avoir = ft.TextField(label="Montant H.T. à créditer (€) *", width=220)
-    txt_date_avoir = ft.TextField(label="Date de l'avoir (AAAA-MM-JJ)", value=str(datetime.date.today()), width=200)
+    txt_motif_avoir = ft.TextField(label="Motif obligatoire de l'avoir * (ex: Annulation, Erreur de calcul...)", expand=True, border_color="#CBD5E1")
+    txt_montant_avoir = ft.TextField(label="Montant H.T. à créditer (€) *", width=220, border_color="#CBD5E1")
+    txt_date_avoir = ft.TextField(label="Date de l'avoir (AAAA-MM-JJ)", value=str(datetime.date.today()), width=200, border_color="#CBD5E1")
 
     def on_orig_select(e):
         if not dd_fact_orig.value:
@@ -3048,20 +4093,28 @@ def view_factures(page: ft.Page):
         c_tag = sanitize_tag(c_info[0] or c_info[1])
 
         num_av = get_next_avoir(c_tag)
+
+        # Scellement cryptographique SHA-256 de l'avoir
+        cursor.execute("SELECT hash_sha256 FROM factures WHERE hash_sha256 IS NOT NULL ORDER BY id DESC LIMIT 1")
+        last_row = cursor.fetchone()
+        prev_hash = last_row[0] if last_row and last_row[0] else "THEMIS-GENESIS-SEAL"
+        empreinte_source = f"{prev_hash}|{num_av}|{num_devis}|{txt_date_avoir.value.strip()}|{-abs(m_av):.2f}"
+        curr_hash = hashlib.sha256(empreinte_source.encode("utf-8")).hexdigest()
+
         cursor.execute(
             """
-            INSERT INTO factures (numero_facture, numero_devis, type_facture, date_facture, date_echeance, montant_ht, statut, numero_facture_liee, motif)
-            VALUES (?, ?, 'Avoir', ?, ?, ?, 'Facture Émise', ?, ?)
+            INSERT INTO factures (numero_facture, numero_devis, type_facture, date_facture, date_echeance, montant_ht, statut, numero_facture_liee, motif, prev_hash, hash_sha256)
+            VALUES (?, ?, 'Avoir', ?, ?, ?, 'Facture Émise', ?, ?, ?, ?)
             """,
-            (num_av, num_devis, txt_date_avoir.value.strip(), txt_date_avoir.value.strip(), -abs(m_av), dd_fact_orig.value, txt_motif_avoir.value.strip()),
+            (num_av, num_devis, txt_date_avoir.value.strip(), txt_date_avoir.value.strip(), -abs(m_av), dd_fact_orig.value, txt_motif_avoir.value.strip(), prev_hash, curr_hash),
         )
         conn.commit()
         conn.close()
-        show_toast(page, f"Avoir {num_av} émis avec succès !")
+        show_toast(page, f"Avoir officiel {num_av} scellé cryptographiquement !")
         page.go("/facturation_print")
 
     form_avoir_view = ft.Column(controls=[
-        ft.Text("Émettre une note de crédit officielle (Avoir)", size=14, weight=ft.FontWeight.W_800, color="#090D16"),
+        ft.Text("Émettre une note de crédit officielle (Avoir rectificatif conforme Art. 286 CGI)", size=14, weight=ft.FontWeight.W_800, color="#090D16"),
         dd_fact_orig,
         lbl_orig_info,
         ft.Row([txt_montant_avoir, txt_date_avoir]),
@@ -3069,7 +4122,7 @@ def view_factures(page: ft.Page):
         ft.ElevatedButton("Émettre l'avoir officiel", icon=ft.icons.CREDIT_CARD_ROUNDED, bgcolor="#B45309", color=ft.colors.WHITE, height=44, on_click=create_avoir),
     ], spacing=16)
 
-    # --- MODE 4 : JOURNAL DES RELANCES & RECOUVREMENT ---
+    # Mode 4 : Journal des Relances & Recouvrement
     def open_email_reader(r_row):
         dlg = ft.AlertDialog(
             title=ft.Row([
@@ -3209,7 +4262,6 @@ def view_factures(page: ft.Page):
         nonlocal current_mode
         current_mode = mode
         
-        # Styles de la barre segmentée
         for m, btn in [("create", btn_mode_create), ("edit", btn_mode_edit), ("avoir", btn_mode_avoir), ("journal", btn_mode_journal)]:
             is_m = (mode == m)
             btn.bgcolor = "#05231A" if is_m else ft.colors.TRANSPARENT
@@ -3227,11 +4279,10 @@ def view_factures(page: ft.Page):
         page.update()
 
     btn_mode_create = ft.ElevatedButton("1. Établir une Facture", icon=ft.icons.ADD_CARD_ROUNDED, on_click=lambda e: set_mode("create"))
-    btn_mode_edit = ft.ElevatedButton("2. Modifier / Corriger", icon=ft.icons.EDIT_NOTE_ROUNDED, on_click=lambda e: set_mode("edit"))
+    btn_mode_edit = ft.ElevatedButton("2. Modifier Échéance/Statut", icon=ft.icons.EDIT_NOTE_ROUNDED, on_click=lambda e: set_mode("edit"))
     btn_mode_avoir = ft.ElevatedButton("3. Émettre un Avoir", icon=ft.icons.REMOVE_CIRCLE_OUTLINE_ROUNDED, on_click=lambda e: set_mode("avoir"))
     btn_mode_journal = ft.ElevatedButton("4. Journal des Relances", icon=ft.icons.HISTORY_ROUNDED, on_click=lambda e: set_mode("journal"))
 
-    # Initialisation de la barre
     set_mode("create")
 
     segmented_bar = ft.Container(
@@ -3260,7 +4311,7 @@ def view_facture_interactive(page: ft.Page):
     conn.close()
 
     dd_select = ft.Dropdown(label="Sélectionner la pièce comptable :", options=[ft.dropdown.Option(str(i[0])) for i in items.values], width=450, border_color="#CBD5E1")
-    dd_statut = ft.Dropdown(label="Changer le statut :", options=[ft.dropdown.Option(s) for s in STATUTS_FACTURES], width=240, border_color="#CBD5E1")
+    dd_statut = ft.Dropdown(label="Changer le statut :", options=[ft.dropdown.Option(s) for s in STATUTS_FACTURES], width=260, border_color="#CBD5E1")
     invoice_sheet_container = ft.Container(visible=False)
 
     def render_in_app_invoice(f_row):
@@ -3453,21 +4504,26 @@ def view_facture_interactive(page: ft.Page):
         show_toast(page, "Fichier Factur-X XML généré avec succès !")
         webbrowser.open(f"file://{exports_dir}")
 
+    # Barre de contrôle responsive sur 2 étages (Zéro dépassement d'écran)
+    control_card = create_card(
+        ft.Column([
+            # Étage 1 : Menus déroulants
+            ft.Row([dd_select, dd_statut], spacing=16),
+            ft.Divider(height=14, color="#E2E8F0"),
+            # Étage 2 : Actions principales avec le bouton Factur-X bien visible
+            ft.Row([
+                ft.ElevatedButton("Valider Statut", icon=ft.icons.CHECK_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, height=42, on_click=update_invoice_status),
+                ft.ElevatedButton("Imprimer Facture (PDF)", icon=ft.icons.PRINT_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=42, on_click=lambda e: execute_print_facture(dd_select.value, page) if dd_select.value else show_toast(page, "Sélectionnez une facture d'abord.", is_error=True)),
+                ft.ElevatedButton("⚡ Export Factur-X (XML)", icon=ft.icons.INTEGRATION_INSTRUCTIONS_ROUNDED, bgcolor="#0F172A", color=ft.colors.WHITE, height=42, on_click=export_facturx),
+            ], spacing=12),
+        ], spacing=10),
+        padding=18,
+    )
+
     return ft.ListView(
         controls=[
             create_header("FAC.02", "APERÇU, FACTUR-X & GESTION DES FACTURES", "CONSULTATION OFFICIELLE • TAMPONS VIRTUELS & EXPORT XML 2026"),
-            create_card(
-                ft.Row(
-                    controls=[
-                        dd_select,
-                        dd_statut,
-                        ft.ElevatedButton("Valider Statut", icon=ft.icons.CHECK_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, height=44, on_click=update_invoice_status),
-                        ft.ElevatedButton("Imprimer Facture (PDF)", icon=ft.icons.PRINT_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=44, on_click=lambda e: execute_print_facture(dd_select.value, page) if dd_select.value else show_toast(page, "Sélectionnez une facture.", is_error=True)),
-                        ft.ElevatedButton("Export Factur-X (XML)", icon=ft.icons.INTEGRATION_INSTRUCTIONS_ROUNDED, bgcolor="#0F172A", color=ft.colors.WHITE, height=44, on_click=export_facturx),
-                    ],
-                    alignment=ft.MainAxisAlignment.START,
-                )
-            ),
+            control_card,
             ft.Container(height=18),
             invoice_sheet_container,
             build_footer(),
@@ -3484,10 +4540,13 @@ def view_livre_recettes(page: ft.Page):
     ent = get_entreprise_info()
     conn.close()
 
-    taux_urssaf, taux_ir = ent["taux_urssaf"], ent["taux_ir"]
-    total_encaisse = df_p["montant_recu"].sum() if not df_p.empty else 0.0
+    taux_urssaf = float(ent.get("taux_urssaf", 21.2))
+    taux_ir = float(ent.get("taux_ir", 2.2))
+    total_encaisse = float(df_p["montant_recu"].sum()) if not df_p.empty else 0.0
+    urssaf_total = total_encaisse * (taux_urssaf / 100.0)
+    ir_total = total_encaisse * (taux_ir / 100.0)
 
-    # Fonction d'export locale et autonome (élimine tout NameError)
+    # Fonction d'export comptable officiel autonome
     def export_recettes(fmt: str):
         conn_exp = get_db()
         today_str = datetime.date.today().strftime("%Y%m%d")
@@ -3530,47 +4589,73 @@ def view_livre_recettes(page: ft.Page):
 
     p_rows = [
         ft.DataRow(cells=[
-            ft.DataCell(ft.Text(r["date_paiement"])),
-            ft.DataCell(ft.Text(r["numero_facture"], weight=ft.FontWeight.BOLD)),
-            ft.DataCell(ft.Text(r["client_nom"])),
-            ft.DataCell(ft.Text(r["nature_prestation"])),
-            ft.DataCell(ft.Text(r["mode_paiement"])),
-            ft.DataCell(ft.Text(f"{float(r['montant_recu']):.2f} €", weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800)),
+            ft.DataCell(ft.Text(r["date_paiement"], color="#090D16", weight=ft.FontWeight.W_600)),
+            ft.DataCell(ft.Text(r["numero_facture"], weight=ft.FontWeight.W_900, color="#05231A")),
+            ft.DataCell(ft.Text(r["client_nom"], color="#475569")),
+            ft.DataCell(ft.Text(r["nature_prestation"], color="#475569")),
+            ft.DataCell(
+                ft.Container(
+                    content=ft.Text(r["mode_paiement"], size=10, weight=ft.FontWeight.BOLD, color="#047857"),
+                    bgcolor="#ECFDF5",
+                    padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                    border_radius=6,
+                )
+            ),
+            ft.DataCell(ft.Text(f"{float(r['montant_recu']):,.2f} €", weight=ft.FontWeight.W_900, color="#047857")),
         ])
         for _, r in df_p.iterrows()
     ]
 
     table_paiements = ft.DataTable(
-        columns=[ft.DataColumn(ft.Text("Date")), ft.DataColumn(ft.Text("N° Facture")), ft.DataColumn(ft.Text("Client")), ft.DataColumn(ft.Text("Nature Prestation")), ft.DataColumn(ft.Text("Règlement")), ft.DataColumn(ft.Text("Encaissé"))],
+        columns=[
+            ft.DataColumn(ft.Text("Date Règlement", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("N° Pièce Facture", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Client / Payeur", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Nature Prestation", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Mode Paiement", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Montant Encaissé", weight=ft.FontWeight.BOLD)),
+        ],
         rows=p_rows,
-        heading_row_color=THEME["sage_pale"],
-        border=ft.border.all(1, THEME["sage_light"]),
+        heading_row_color="#F8FAFC",
+        border=ft.border.all(1, "#CBD5E1"),
         border_radius=8,
+        column_spacing=24,
     )
+
+    table_container = ft.Row([table_paiements], scroll=ft.ScrollMode.AUTO)
 
     return ft.ListView(
         controls=[
-            create_header("💰", "Livre des Recettes (URSSAF)", "Document légal obligatoire listant les encaissements réels"),
+            create_header("FIN.01", "LIVRE DES RECETTES (URSSAF)", "REGISTRE LÉGAL OBLIGATOIRE • ENCAISSEMENTS RÉELS & EXPORTS FISCAUX"),
             create_card(
                 ft.Column([
                     ft.Row([
-                        ft.Column([ft.Text("TOTAL ENCAISSÉ", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{total_encaisse:.2f} €", size=22, weight=ft.FontWeight.BOLD, color=ft.colors.GREEN_800)]),
-                        ft.Column([ft.Text(f"COTISATIONS URSSAF ({taux_urssaf}%)", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{(total_encaisse * taux_urssaf / 100):.2f} €", size=20, weight=ft.FontWeight.BOLD, color=THEME["sage_dark"])]),
-                        ft.Column([ft.Text(f"IMPÔT REVENU IR ({taux_ir}%)", size=10, color=THEME["text_muted"], weight=ft.FontWeight.BOLD), ft.Text(f"{(total_encaisse * taux_ir / 100):.2f} €", size=20, weight=ft.FontWeight.BOLD, color=THEME["blush_dark"])]),
+                        ft.Column([
+                            ft.Text("CA TOTAL RÉELLEMENT ENCAISSÉ", size=10, color="#64748B", weight=ft.FontWeight.BOLD),
+                            ft.Text(f"{total_encaisse:,.2f} €", size=22, weight=ft.FontWeight.W_900, color="#047857"),
+                        ]),
+                        ft.Column([
+                            ft.Text(f"COTISATIONS URSSAF ({taux_urssaf}%)", size=10, color="#64748B", weight=ft.FontWeight.BOLD),
+                            ft.Text(f"{urssaf_total:,.2f} €", size=20, weight=ft.FontWeight.W_900, color="#05231A"),
+                        ]),
+                        ft.Column([
+                            ft.Text(f"IMPÔT SUR LE REVENU ({taux_ir}%)", size=10, color="#64748B", weight=ft.FontWeight.BOLD),
+                            ft.Text(f"{ir_total:,.2f} €", size=20, weight=ft.FontWeight.W_900, color="#B45309"),
+                        ]),
                     ], alignment=ft.MainAxisAlignment.SPACE_AROUND),
-                    ft.Divider(height=16, color=THEME["sage_light"]),
+                    ft.Divider(height=16, color="#CBD5E1"),
                     ft.Row([
-                        ft.Text("Exports légaux conformes URSSAF / Contrôle fiscal :", size=12, weight=ft.FontWeight.BOLD),
+                        ft.Text("Exports légaux conformes contrôle fiscal / déclaration :", size=11.5, weight=ft.FontWeight.W_700, color="#475569"),
                         ft.Row([
-                            ft.ElevatedButton("📊 Exporter en Excel (.xlsx)", icon=ft.icons.TABLE_VIEW_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=lambda e: export_recettes("xlsx")),
-                            ft.ElevatedButton("📄 Exporter en CSV (.csv)", icon=ft.icons.FILE_DOWNLOAD_ROUNDED, bgcolor=THEME["sage_dark"], color=ft.colors.WHITE, on_click=lambda e: export_recettes("csv")),
+                            ft.ElevatedButton("Exporter en Excel (.xlsx)", icon=ft.icons.TABLE_VIEW_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=40, on_click=lambda e: export_recettes("xlsx")),
+                            ft.ElevatedButton("Exporter en CSV (.csv)", icon=ft.icons.FILE_DOWNLOAD_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, height=40, on_click=lambda e: export_recettes("csv")),
                         ], spacing=10),
                     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ], spacing=12),
                 padding=20,
             ),
-            ft.Container(height=18),
-            create_card(table_paiements if p_rows else ft.Text("Aucun encaissement pour le moment.", italic=True), padding=16),
+            ft.Container(height=16),
+            create_card(table_container if p_rows else ft.Text("Aucun encaissement enregistré pour le moment.", italic=True, color="#64748B"), padding=16),
             build_footer(),
         ],
         spacing=10,
@@ -3586,7 +4671,6 @@ def view_depenses(page: ft.Page):
 
     total_dep = df_dep["montant"].sum() if not df_dep.empty else 0.0
 
-    # Fonction d'export locale et autonome des dépenses
     def export_depenses(fmt: str):
         conn_exp = get_db()
         today_str = datetime.date.today().strftime("%Y%m%d")
@@ -3627,63 +4711,227 @@ def view_depenses(page: ft.Page):
         except Exception as ex:
             show_toast(page, f"Erreur export : {str(ex)}", is_error=True)
 
-    txt_fournisseur = ft.TextField(label="Fournisseur *", expand=True)
-    txt_date_d = ft.TextField(label="Date (AAAA-MM-JJ)", value=str(datetime.date.today()), width=200)
-    dd_cat = ft.Dropdown(label="Catégorie", options=[ft.dropdown.Option(c) for c in CATEGORIES_DEPENSES], value=CATEGORIES_DEPENSES[0], width=260)
-    txt_montant_d = ft.TextField(label="Montant TTC (€) *", width=180)
+    txt_fournisseur = ft.TextField(label="Fournisseur *", expand=True, border_color="#CBD5E1")
+    txt_date_d = ft.TextField(label="Date (AAAA-MM-JJ)", value=str(datetime.date.today()), width=180, border_color="#CBD5E1")
+    dd_cat = ft.Dropdown(
+        label="Catégorie comptable",
+        options=[ft.dropdown.Option(c) for c in CATEGORIES_DEPENSES],
+        value=CATEGORIES_DEPENSES[0],
+        width=250,
+        border_color="#CBD5E1"
+    )
+    txt_montant_d = ft.TextField(label="Montant TTC (€) *", width=180, border_color="#CBD5E1")
+    txt_ref_facture = ft.TextField(label="Réf / N° Facture Fournisseur", width=220, border_color="#CBD5E1")
+
+    # Moteur de décodage Factur-X depuis chaîne XML pure (compatible 100% Web et Bureau)
+    def process_facturx_xml_string(xml_text: str):
+        try:
+            root = ET.fromstring(xml_text)
+            parsed_data = {"fournisseur": "", "date": "", "montant": 0.0, "ref": ""}
+
+            for elem in root.iter():
+                tag = elem.tag.split("}")[-1]
+                if tag == "SellerTradeParty":
+                    for sub in elem.iter():
+                        if sub.tag.split("}")[-1] == "Name" and sub.text:
+                            parsed_data["fournisseur"] = sub.text.strip()
+                            break
+                elif tag == "IssueDateTime":
+                    for sub in elem.iter():
+                        if sub.text and len(sub.text.strip()) >= 8:
+                            raw_d = sub.text.strip()
+                            if len(raw_d) == 8 and raw_d.isdigit():
+                                parsed_data["date"] = f"{raw_d[:4]}-{raw_d[4:6]}-{raw_d[6:]}"
+                            else:
+                                parsed_data["date"] = raw_d[:10]
+                elif tag in ["GrandTotalAmount", "DuePayableAmount", "TaxInclusiveAmount", "LineTotalAmount"]:
+                    if elem.text:
+                        try:
+                            val = float(elem.text.strip().replace(",", "."))
+                            if val > 0 and parsed_data["montant"] == 0:
+                                parsed_data["montant"] = val
+                        except ValueError:
+                            pass
+                elif tag == "ExchangedDocument":
+                    for sub in elem.iter():
+                        if sub.tag.split("}")[-1] == "ID" and sub.text:
+                            parsed_data["ref"] = sub.text.strip()
+                            break
+
+            if parsed_data["fournisseur"]:
+                txt_fournisseur.value = parsed_data["fournisseur"]
+            if parsed_data["date"]:
+                txt_date_d.value = parsed_data["date"]
+            if parsed_data["montant"] > 0:
+                txt_montant_d.value = f"{parsed_data['montant']:.2f}"
+            if parsed_data["ref"]:
+                txt_ref_facture.value = parsed_data["ref"]
+
+            show_toast(page, f"Factur-X lue : {parsed_data['fournisseur']} ({parsed_data['montant']:.2f} €) pré-remplie !")
+            page.update()
+            return True
+        except Exception as ex:
+            show_toast(page, f"Erreur de décodage Factur-X : {str(ex)}", is_error=True)
+            return False
+
+    # Fenêtre Popup pour coller ou charger le XML Factur-X (Zéro crash sur le Web)
+    def open_facturx_modal(e):
+        txt_xml_input = ft.TextField(
+            label="Contenu XML Factur-X de la facture reçue :",
+            hint_text="Collez ici le texte XML de votre fournisseur (<rsm:CrossIndustryInvoice ...)",
+            multiline=True,
+            min_lines=8,
+            max_lines=12,
+            border_color="#CBD5E1",
+            text_size=11,
+            expand=True,
+        )
+
+        def analyze_pasted_xml(ev):
+            raw = txt_xml_input.value.strip()
+            if not raw:
+                show_toast(page, "Veuillez coller le code XML de la facture.", is_error=True)
+                return
+            success = process_facturx_xml_string(raw)
+            if success:
+                close_modal(dlg_facturx)
+
+        def close_modal(d):
+            if hasattr(page, "close"): page.close(d)
+            else:
+                d.open = False
+                page.update()
+
+        dlg_facturx = ft.AlertDialog(
+            title=ft.Row([
+                ft.Container(
+                    content=ft.Icon(ft.icons.INTEGRATION_INSTRUCTIONS_ROUNDED, color="#A7F3D0", size=18),
+                    bgcolor="#0B382A",
+                    padding=6,
+                    border_radius=6,
+                ),
+                ft.Text("RÉCEPTION & ANALYSE FACTUR-X 2026", size=14, weight=ft.FontWeight.W_900, color="#FFFFFF"),
+            ], spacing=10),
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Text("Collez le contenu XML de la facture reçue pour pré-remplir la dépense en 1 seconde :", size=11.5, color="#64748B"),
+                    txt_xml_input,
+                ], spacing=10),
+                width=650,
+                height=340,
+                padding=10,
+            ),
+            actions=[
+                ft.TextButton("Annuler", on_click=lambda ev: close_modal(dlg_facturx)),
+                ft.ElevatedButton("⚡ Analyser & Pré-remplir", icon=ft.icons.AUTO_AWESOME_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=44, on_click=analyze_pasted_xml),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        if hasattr(page, "open"): page.open(dlg_facturx)
+        else:
+            page.dialog = dlg_facturx
+            dlg_facturx.open = True
+            page.update()
 
     def add_depense(e):
-        if not txt_fournisseur.value.strip() or not txt_montant_d.value.strip(): return
-        try: m = float(txt_montant_d.value.replace(",", "."))
-        except ValueError: return
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO depenses (date_depense, fournisseur, categorie, montant, mode_paiement, justificatif_ref, notes) VALUES (?, ?, ?, ?, 'Carte bancaire', '', '')", (txt_date_d.value.strip(), txt_fournisseur.value.strip(), dd_cat.value, m))
-        conn.commit()
-        conn.close()
-        show_toast(page, "Dépense enregistrée !")
+        if not txt_fournisseur.value.strip() or not txt_montant_d.value.strip():
+            show_toast(page, "Le fournisseur et le montant sont obligatoires.", is_error=True)
+            return
+        try:
+            m = float(txt_montant_d.value.replace(",", "."))
+        except ValueError:
+            show_toast(page, "Montant invalide.", is_error=True)
+            return
+        conn_ins = get_db()
+        cursor_ins = conn_ins.cursor()
+        cursor_ins.execute(
+            """
+            INSERT INTO depenses (date_depense, fournisseur, categorie, montant, mode_paiement, justificatif_ref, notes)
+            VALUES (?, ?, ?, ?, 'Virement bancaire', ?, 'Facture Factur-X reçue')
+            """,
+            (txt_date_d.value.strip(), txt_fournisseur.value.strip(), dd_cat.value, m, txt_ref_facture.value.strip())
+        )
+        conn_ins.commit()
+        conn_ins.close()
+        show_toast(page, "Dépense enregistrée avec succès !")
         page.go("/depenses")
 
     dep_rows = [
         ft.DataRow(cells=[
             ft.DataCell(ft.Text(r["date_depense"])),
-            ft.DataCell(ft.Text(r["fournisseur"], weight=ft.FontWeight.BOLD)),
-            ft.DataCell(ft.Text(r["categorie"])),
-            ft.DataCell(ft.Text(f"{float(r['montant']):.2f} €", color=THEME["blush_dark"], weight=ft.FontWeight.BOLD)),
+            ft.DataCell(ft.Text(r["fournisseur"], weight=ft.FontWeight.W_800, color="#090D16")),
+            ft.DataCell(
+                ft.Container(
+                    content=ft.Text(r["categorie"], size=10, weight=ft.FontWeight.BOLD, color="#475569"),
+                    bgcolor="#F1F5F9",
+                    padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                    border_radius=6,
+                )
+            ),
+            ft.DataCell(ft.Text(r["justificatif_ref"] or "-", color="#64748B", size=11)),
+            ft.DataCell(ft.Text(f"{float(r['montant']):,.2f} € TTC", color="#B45309", weight=ft.FontWeight.W_900)),
         ])
         for _, r in df_dep.iterrows()
     ]
 
     table_depenses = ft.DataTable(
-        columns=[ft.DataColumn(ft.Text("Date")), ft.DataColumn(ft.Text("Fournisseur")), ft.DataColumn(ft.Text("Catégorie")), ft.DataColumn(ft.Text("Montant"))],
-        rows=dep_rows, heading_row_color=THEME["sage_pale"], border=ft.border.all(1, THEME["sage_light"]), border_radius=8,
+        columns=[
+            ft.DataColumn(ft.Text("Date", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Fournisseur", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Catégorie de Charge", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Réf Facture", weight=ft.FontWeight.BOLD)),
+            ft.DataColumn(ft.Text("Montant Payé", weight=ft.FontWeight.BOLD)),
+        ],
+        rows=dep_rows,
+        heading_row_color="#F8FAFC",
+        border=ft.border.all(1, "#CBD5E1"),
+        border_radius=8,
     )
 
     return ft.ListView(
         controls=[
-            create_header("📉", "Dépenses & Achats", "Frais d'exploitation, abonnements et registre comptable des charges"),
+            create_header("FIN.02", "REGISTRE DES DÉPENSES & RÉCEPTION FACTUR-X", "GESTION DE PRÉCISION • CONFORMITÉ RÉCEPTION 2026 & CONTRÔLE DES CHARGES"),
             create_card(
-                ft.Column(controls=[
-                    ft.Text("➕ Ajouter une dépense d'exploitation", size=15, weight=ft.FontWeight.BOLD),
-                    ft.Row([txt_date_d, txt_fournisseur, dd_cat, txt_montant_d, ft.ElevatedButton("Ajouter", bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=add_depense)]),
-                ], spacing=14)
+                ft.Column([
+                    ft.Row([
+                        ft.Text("Enregistrer un achat fournisseur :", size=13.5, weight=ft.FontWeight.W_800, color="#090D16"),
+                        ft.ElevatedButton(
+                            "📥 Importer Facture Fournisseur (Factur-X)",
+                            icon=ft.icons.DOCUMENT_SCANNER_ROUNDED,
+                            bgcolor="#05231A",
+                            color=ft.colors.WHITE,
+                            height=40,
+                            on_click=open_facturx_modal,
+                        ),
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ft.Text("⚡ Conformité 2026 : importez ou collez le fichier Factur-X XML reçu d'un fournisseur pour remplir automatiquement le montant et le nom sans saisie manuelle.", size=11, color="#64748B", italic=True),
+                    ft.Divider(height=12, color="#E2E8F0"),
+                    ft.Row([txt_date_d, txt_fournisseur, txt_ref_facture]),
+                    ft.Row([
+                        dd_cat,
+                        txt_montant_d,
+                        ft.ElevatedButton("Enregistrer la dépense", icon=ft.icons.CHECK_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=48, on_click=add_depense),
+                    ]),
+                ], spacing=12),
+                padding=20,
             ),
             ft.Container(height=14),
             create_card(
                 ft.Row([
                     ft.Column([
-                        ft.Text("TOTAL DES DÉPENSES ENGAGÉES", size=11, color=THEME["text_muted"], weight=ft.FontWeight.BOLD),
-                        ft.Text(f"{total_dep:.2f} € TTC", size=20, weight=ft.FontWeight.BOLD, color=THEME["blush_dark"]),
+                        ft.Text("TOTAL DES DÉPENSES ENGAGÉES", size=10, color="#64748B", weight=ft.FontWeight.BOLD),
+                        ft.Text(f"{total_dep:,.2f} € TTC", size=20, weight=ft.FontWeight.W_900, color="#B45309"),
                     ]),
                     ft.Row([
-                        ft.ElevatedButton("📊 Exporter Dépenses (.xlsx)", icon=ft.icons.TABLE_VIEW_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, on_click=lambda e: export_depenses("xlsx")),
-                        ft.ElevatedButton("📄 Exporter Dépenses (.csv)", icon=ft.icons.FILE_DOWNLOAD_ROUNDED, bgcolor=THEME["sage_dark"], color=ft.colors.WHITE, on_click=lambda e: export_depenses("csv")),
+                        ft.ElevatedButton("Exporter Dépenses (.xlsx)", icon=ft.icons.TABLE_VIEW_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, on_click=lambda e: export_depenses("xlsx")),
+                        ft.ElevatedButton("Exporter Dépenses (.csv)", icon=ft.icons.FILE_DOWNLOAD_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, on_click=lambda e: export_depenses("csv")),
                     ], spacing=10),
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 padding=18,
             ),
             ft.Container(height=14),
-            create_card(table_depenses if dep_rows else ft.Text("Aucune dépense enregistrée.", italic=True), padding=16),
+            create_card(table_depenses if dep_rows else ft.Text("Aucune dépense enregistrée.", italic=True, color="#64748B"), padding=16),
             build_footer(),
         ],
         spacing=10,
@@ -3931,25 +5179,26 @@ def view_dossier_contractuel(page: ft.Page):
 # --- 13. PARAMÈTRES ENTREPRISE (AVEC COORDONNÉES BANCAIRES ÉTAPE 1) ---
 def view_settings(page: ft.Page):
     ent = get_entreprise_info()
-    txt_nom = ft.TextField(label="Nom commercial / Raison sociale", value=ent["nom"])
-    txt_adresse = ft.TextField(label="Adresse du siège", value=ent["adresse"])
-    txt_forme = ft.TextField(label="Forme juridique", value="" if ent["forme_juridique"] == "Non renseigné" else ent["forme_juridique"])
-    txt_siret = ft.TextField(label="Numéro SIRET (14 chiffres)", value="" if ent["siret"] == "Non renseigné" else ent["siret"])
-    txt_rcs = ft.TextField(label="RCS ou RM", value="" if ent["rcs_rm"] == "Non renseigné" else ent["rcs_rm"])
+    txt_nom = ft.TextField(label="Nom commercial / Raison sociale *", value=ent["nom"], border_color="#CBD5E1")
+    txt_adresse = ft.TextField(label="Adresse officielle du siège *", value=ent["adresse"], border_color="#CBD5E1")
+    txt_forme = ft.TextField(label="Forme juridique", value="" if ent["forme_juridique"] == "Non renseigné" else ent["forme_juridique"], border_color="#CBD5E1")
+    txt_siret = ft.TextField(label="Numéro SIRET (14 chiffres)", value="" if ent["siret"] == "Non renseigné" else ent["siret"], border_color="#CBD5E1")
+    txt_rcs = ft.TextField(label="RCS ou Répertoire des Métiers", value="" if ent["rcs_rm"] == "Non renseigné" else ent["rcs_rm"], border_color="#CBD5E1")
 
-    txt_taux_urssaf = ft.TextField(label="Taux Cotisations URSSAF (%)", value=f"{ent['taux_urssaf']:.1f}", width=220)
-    txt_taux_ir = ft.TextField(label="Taux Provision Impôt sur le Revenu (%)", value=f"{ent['taux_ir']:.1f}", width=220)
+    txt_taux_urssaf = ft.TextField(label="Cotisations URSSAF (%)", value=f"{ent['taux_urssaf']:.1f}", width=220, border_color="#CBD5E1")
+    txt_taux_ir = ft.TextField(label="Prélèvement Libératoire IR (%)", value=f"{ent['taux_ir']:.1f}", width=220, border_color="#CBD5E1")
 
-    txt_banque = ft.TextField(label="Nom de l'Établissement Bancaire", value=ent["banque_nom"], width=320)
-    txt_titulaire = ft.TextField(label="Titulaire du compte bancaire", value=ent["titulaire_compte"] or ent["nom"], expand=True)
-    txt_iban = ft.TextField(label="IBAN (ex: FR76 1234 5678 ...)", value=ent["iban"], expand=True)
-    txt_bic = ft.TextField(label="Code BIC / SWIFT", value=ent["bic"], width=240)
+    txt_banque = ft.TextField(label="Établissement Bancaire", value=ent["banque_nom"], width=320, border_color="#CBD5E1")
+    txt_titulaire = ft.TextField(label="Titulaire du compte", value=ent["titulaire_compte"] or ent["nom"], expand=True, border_color="#CBD5E1")
+    txt_iban = ft.TextField(label="IBAN (ex: FR76 1234 5678 ...)", value=ent["iban"], expand=True, border_color="#CBD5E1")
+    txt_bic = ft.TextField(label="Code BIC / SWIFT", value=ent["bic"], width=240, border_color="#CBD5E1")
 
     txt_webhook_make = ft.TextField(
         label="URL du Webhook Make (Integromat) pour les Relances d'Impayés",
         value=ent.get("webhook_make_relance", ""),
         hint_text="https://hook.eu1.make.com/xxxxxxxxxxxxxxxxxxxxxxxx",
         expand=True,
+        border_color="#CBD5E1",
     )
 
     chk_assujetti_tva = ft.Checkbox(
@@ -3967,6 +5216,7 @@ def view_settings(page: ft.Page):
         ],
         value=f"{ent.get('taux_tva_defaut'):.1f}" if f"{ent.get('taux_tva_defaut'):.1f}" in ["8.5", "20.0", "2.1", "10.0"] else "8.5",
         width=380,
+        border_color="#CBD5E1",
     )
 
     txt_tva_intercom = ft.TextField(
@@ -3974,6 +5224,7 @@ def view_settings(page: ft.Page):
         value=ent.get("numero_tva_intercom", ""),
         hint_text="FR 12 345678901",
         width=300,
+        border_color="#CBD5E1",
     )
 
     def on_tva_toggle(e):
@@ -3991,7 +5242,7 @@ def view_settings(page: ft.Page):
             t_i = float(txt_taux_ir.value.replace(",", "."))
             t_tva = float(dd_taux_tva.value.replace(",", ".")) if dd_taux_tva.value else 8.5
         except ValueError:
-            show_toast(page, "Les taux doivent être des valeurs numériques.", is_error=True)
+            show_toast(page, "Les taux doivent être des valeurs numériques valides.", is_error=True)
             return
 
         conn = get_db()
@@ -4014,11 +5265,10 @@ def view_settings(page: ft.Page):
         )
         conn.commit()
         conn.close()
-        show_toast(page, "Paramètres d'entreprise, coordonnées bancaires et régime TVA enregistrés !")
+        show_toast(page, "Paramètres d'entreprise et fiscalité actualisés avec succès !")
         page.go("/dashboard")
 
     def print_attestation_art286(e):
-        """Imprime l'attestation légale officielle de conformité éditeur."""
         html = generate_attestation_conformite_html(ent)
         with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html", encoding="utf-8") as tf:
             tf.write(html)
@@ -4050,60 +5300,158 @@ def view_settings(page: ft.Page):
         except Exception as ex:
             show_toast(page, f"Erreur de sauvegarde : {str(ex)}", is_error=True)
 
+    # --- NOUVEAU : AUDIT D'INTÉGRITÉ SHA-256 EN DIRECT ---
+    def verify_integrity_chain(e):
+        conn_v = get_db()
+        conn_v.row_factory = sqlite3.Row
+        c_v = conn_v.cursor()
+        c_v.execute("SELECT numero_facture, numero_devis, date_facture, montant_ht, prev_hash, hash_sha256 FROM factures WHERE hash_sha256 IS NOT NULL ORDER BY id ASC")
+        rows = c_v.fetchall()
+        conn_v.close()
+
+        if not rows:
+            show_toast(page, "Aucune facture scellée à vérifier pour le moment.")
+            return
+
+        expected_prev = "THEMIS-GENESIS-SEAL"
+        errors = 0
+        for r in rows:
+            calc_src = f"{r['prev_hash']}|{r['numero_facture']}|{r['numero_devis']}|{r['date_facture']}|{float(r['montant_ht']):.2f}"
+            calc_hash = hashlib.sha256(calc_src.encode("utf-8")).hexdigest()
+            if calc_hash != r["hash_sha256"] or r["prev_hash"] != expected_prev:
+                errors += 1
+                break
+            expected_prev = r["hash_sha256"]
+
+        if errors == 0:
+            show_toast(page, f"✅ Chaîne cryptographique 100% intègre : {len(rows)} pièce(s) vérifiée(s) sans altération !")
+        else:
+            show_toast(page, "⚠️ ALERTE : Rupture d'intégrité détectée dans la chaîne des factures !", is_error=True)
+
+    # --- NOUVEAU : CLÔTURE FISCALE D'EXERCICE ---
+    current_year = datetime.date.today().year
+    annees_cloturables = [str(y) for y in range(current_year - 5, current_year)]
+    dd_cloture_annee = ft.Dropdown(
+        label="Exercice fiscal à clôturer définitivement :",
+        options=[ft.dropdown.Option(y) for y in annees_cloturables],
+        value=str(current_year - 1),
+        width=250,
+        border_color="#CBD5E1",
+    )
+
+    def do_cloture_exercice(e):
+        target_year = int(dd_cloture_annee.value)
+        conn_cl = get_db()
+        cursor_cl = conn_cl.cursor()
+        cursor_cl.execute("SELECT annee FROM exercices_fiscaux WHERE annee = ?", (target_year,))
+        if cursor_cl.fetchone():
+            conn_cl.close()
+            show_toast(page, f"L'exercice {target_year} est déjà clôturé.", is_error=True)
+            return
+
+        # Calcul des totaux figés de l'exercice
+        cursor_cl.execute("SELECT SUM(montant_recu) FROM paiements WHERE date_paiement LIKE ?", (f"{target_year}%",))
+        tot_p = cursor_cl.fetchone()[0] or 0.0
+
+        cursor_cl.execute("SELECT SUM(montant_ht) FROM factures WHERE date_facture LIKE ?", (f"{target_year}%",))
+        tot_f = cursor_cl.fetchone()[0] or 0.0
+
+        today_s = str(datetime.date.today())
+        seal_archive = hashlib.sha256(f"CLOTURE|{target_year}|{tot_p:.2f}|{tot_f:.2f}|{today_s}".encode("utf-8")).hexdigest()
+
+        cursor_cl.execute(
+            """
+            INSERT INTO exercices_fiscaux (annee, date_cloture, total_encaisse, total_facture, sha256_archive)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (target_year, today_s, tot_p, tot_f, seal_archive)
+        )
+        conn_cl.commit()
+        conn_cl.close()
+        show_toast(page, f"L'exercice {target_year} a été formellement clôturé et scellé (Art. 286 CGI) !")
+
     return ft.ListView(
         controls=[
-            create_header("⚙️", "Paramètres, Fiscalité & Conformité", "Informations légales, fiscalité, banque, TVA, Make et certificat éditeur"),
+            create_header("SET.01", "PARAMÈTRES, FISCALITÉ & SÉCURITÉ SYSTÈME", "CONFIGURATION OFFICIELLE • COORDONNÉES BANCAIRES, TVA & CONFORMITÉ"),
             create_card(
                 ft.Column(controls=[
-                    ft.Text("1. Informations Légales", weight=ft.FontWeight.BOLD, size=15),
+                    ft.Text("1. Informations Légales de l'Entreprise", weight=ft.FontWeight.W_800, size=13.5, color="#090D16"),
                     txt_nom, txt_adresse, txt_forme, txt_siret, txt_rcs,
-                    ft.Divider(height=18),
-                    ft.Text("2. Coordonnées Bancaires (Affichées sur Factures & Devis)", weight=ft.FontWeight.BOLD, size=15, color=THEME["sage_dark"]),
+                    ft.Divider(height=18, color="#CBD5E1"),
+                    ft.Text("2. Coordonnées Bancaires (Affichées sur Factures & Devis)", weight=ft.FontWeight.W_800, size=13.5, color="#05231A"),
                     ft.Row([txt_banque, txt_titulaire]),
                     ft.Row([txt_iban, txt_bic]),
-                    ft.Divider(height=18),
-                    ft.Text("3. Régime de TVA & Fiscalité (Franchise vs Assujetti)", weight=ft.FontWeight.BOLD, size=15, color=ft.colors.BLUE_800),
+                    ft.Divider(height=18, color="#CBD5E1"),
+                    ft.Text("3. Régime de TVA & Fiscalité (Franchise vs Assujetti)", weight=ft.FontWeight.W_800, size=13.5, color="#1E40AF"),
                     chk_assujetti_tva,
                     ft.Row([dd_taux_tva, txt_tva_intercom]),
-                    ft.Text("💡 En Guadeloupe, le taux de TVA standard est de 8,5 % (20 % en Métropole). Lorsque la case est décochée, Themis applique la Franchise en base (Art. 293 B du CGI).", size=11, color=THEME["text_muted"], italic=True),
-                    ft.Divider(height=18),
-                    ft.Text("4. Intégration Make (Relance Automatisée des Impayés)", weight=ft.FontWeight.BOLD, size=15, color=ft.colors.PURPLE_800),
+                    ft.Text("💡 En Guadeloupe, le taux de TVA standard est de 8,5 % (20 % en Métropole). Lorsque la case est décochée, Themis applique la Franchise en base (Art. 293 B du CGI).", size=11, color="#64748B", italic=True),
+                    ft.Divider(height=18, color="#CBD5E1"),
+                    ft.Text("4. Intégration Make (Relance Automatisée des Impayés)", weight=ft.FontWeight.W_800, size=13.5, color=ft.colors.PURPLE_800),
                     txt_webhook_make,
-                    ft.Divider(height=18),
-                    ft.Text("5. Taux Sociaux & Impôt Micro-Entreprise", weight=ft.FontWeight.BOLD, size=15),
+                    ft.Divider(height=18, color="#CBD5E1"),
+                    ft.Text("5. Taux Sociaux & Impôt Micro-Entreprise", weight=ft.FontWeight.W_800, size=13.5, color="#090D16"),
                     ft.Row([txt_taux_urssaf, txt_taux_ir]),
-                    ft.ElevatedButton("Enregistrer l'ensemble des paramètres", icon=ft.icons.SAVE_ROUNDED, bgcolor=THEME["sage"], color=ft.colors.WHITE, height=48, on_click=save_settings),
-                ], spacing=14)
+                    ft.ElevatedButton("Enregistrer l'ensemble des paramètres", icon=ft.icons.SAVE_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=48, on_click=save_settings),
+                ], spacing=14),
+                padding=22,
             ),
-            ft.Container(height=18),
-            create_card(
-                ft.Row([
-                    ft.Column([
-                        ft.Text("📜 Conformité Éditeur — Article 286 du CGI", size=15, weight=ft.FontWeight.BOLD, color="#1A365D"),
-                        ft.Text("Générez l'attestation formelle d'inaltérabilité, sécurisation, conservation et archivage exigée par l'administration fiscale.", size=12, color=THEME["text_muted"]),
-                    ], expand=True),
-                    ft.ElevatedButton("🖨️ Éditer l'Attestation Fiscale (PDF)", icon=ft.icons.GAVEL_ROUNDED, bgcolor="#1A365D", color=ft.colors.WHITE, height=45, on_click=print_attestation_art286),
-                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                padding=20,
-            ),
-            ft.Container(height=18),
+            ft.Container(height=16),
             create_card(
                 ft.Column([
                     ft.Row([
-                        ft.Icon(ft.icons.SECURITY_ROUNDED, color=THEME["sage_dark"], size=22),
-                        ft.Text("6. Sauvegarde Globale & Protection des Données (Archive ZIP)", weight=ft.FontWeight.BOLD, size=15, color=THEME["sage_dark"]),
+                        ft.Icon(ft.icons.SHIELD_ROUNDED, color="#047857", size=22),
+                        ft.Text("6. Scellement Cryptographique SHA-256 & Intégrité Fiscale", size=14, weight=ft.FontWeight.W_800, color="#05231A"),
+                    ], spacing=8),
+                    ft.Text("Vérifiez l'intégrité de la chaîne cryptographique liant vos factures pour prouver l'absence totale d'altération en cas de contrôle fiscal :", size=11.5, color="#64748B"),
+                    ft.ElevatedButton("Vérifier la chaîne cryptographique en direct", icon=ft.icons.VERIFIED_ROUNDED, bgcolor="#047857", color=ft.colors.WHITE, height=42, on_click=verify_integrity_chain),
+                ], spacing=12),
+                padding=20,
+            ),
+            ft.Container(height=16),
+            create_card(
+                ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.icons.LOCK_CLOCK_ROUNDED, color="#B45309", size=22),
+                        ft.Text("7. Clôture Annuelle d'Exercice Fiscal (Verrouillage Temporel)", size=14, weight=ft.FontWeight.W_800, color="#05231A"),
+                    ], spacing=8),
+                    ft.Text("La clôture fige les écritures d'une année écoulée et interdit toute modification ou création rétroactive de facture :", size=11.5, color="#64748B"),
+                    ft.Row([
+                        dd_cloture_annee,
+                        ft.ElevatedButton("🔒 Clôturer définitivement l'exercice", icon=ft.icons.LOCK_ROUNDED, bgcolor="#B45309", color=ft.colors.WHITE, height=44, on_click=do_cloture_exercice),
+                    ]),
+                ], spacing=12),
+                padding=20,
+            ),
+            ft.Container(height=16),
+            create_card(
+                ft.Row([
+                    ft.Column([
+                        ft.Text("Conformité Éditeur — Article 286 du CGI", size=14, weight=ft.FontWeight.W_800, color="#05231A"),
+                        ft.Text("Générez l'attestation formelle d'inaltérabilité, sécurisation, conservation et archivage exigée par l'administration fiscale.", size=11.5, color="#64748B"),
+                    ], expand=True),
+                    ft.ElevatedButton("Éditer l'Attestation Fiscale (PDF)", icon=ft.icons.GAVEL_ROUNDED, bgcolor="#05231A", color=ft.colors.WHITE, height=44, on_click=print_attestation_art286),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                padding=20,
+            ),
+            ft.Container(height=16),
+            create_card(
+                ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.icons.SECURITY_ROUNDED, color="#05231A", size=22),
+                        ft.Text("Sauvegarde Globale & Protection des Données (Archive ZIP)", weight=ft.FontWeight.W_800, size=14, color="#05231A"),
                     ], spacing=8),
                     ft.Text(
                         "Générez une archive ZIP autonome et horodatée contenant la totalité de votre base de données comptable (devis_suivi.db) et l'intégralité de vos scans de contrats clients.",
-                        size=12,
-                        color=THEME["text_muted"],
+                        size=11.5,
+                        color="#64748B",
                     ),
                     ft.ElevatedButton(
-                        "💾 Créer une Sauvegarde Complète en 1 Clic (ZIP)",
+                        "Créer une Sauvegarde Complète en 1 Clic (ZIP)",
                         icon=ft.icons.ARCHIVE_ROUNDED,
-                        bgcolor=ft.colors.GREEN_800,
+                        bgcolor="#047857",
                         color=ft.colors.WHITE,
-                        height=46,
+                        height=44,
                         on_click=do_system_backup,
                     ),
                 ], spacing=12),
@@ -4115,12 +5463,145 @@ def view_settings(page: ft.Page):
         expand=True,
     )
 
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import urllib.parse
+
+# Jeton secret partagé pour sécuriser l'API (à personnaliser)
+PASSERELLE_SECRET_TOKEN = "THEMIS_SECURE_MANDAT_2026_DOM"
+PASSERELLE_PORT = int(os.environ.get("PORT", 8765))
+
+class MandatWebhookHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        # 1. Vérification de l'endpoint
+        if self.path != "/api/nouveau-mandat":
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        # 2. Vérification de sécurité (Bearer Token ou Header X-Themis-Token)
+        auth_header = self.headers.get("X-Themis-Token") or self.headers.get("Authorization", "").replace("Bearer ", "")
+        if auth_header != PASSERELLE_SECRET_TOKEN:
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Jeton d'autorisation non valide"}).encode("utf-8"))
+            return
+
+        # 3. Lecture du payload JSON
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+
+        try:
+            data = json.loads(body.decode("utf-8"))
+
+            nom_entreprise = data.get("nom_entreprise", "").strip()
+            siret = re.sub(r"\s+", "", data.get("siret", "").strip())
+            commune = data.get("commune", "Baie-Mahault").strip()
+            representant = data.get("representant_legal", "").strip()
+            email = data.get("email_client", "").strip()
+            tel = data.get("telephone_client", "").strip()
+
+            if not nom_entreprise or not siret or not representant:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Champs obligatoires manquants"}).encode("utf-8"))
+                return
+
+            # Calcul financier automatisé (Règles Chèque TIC 80%/40%)
+            b_web = float(data.get("budget_web_ht", 3200.0))
+            b_secu = float(data.get("budget_securite_ht", 1800.0))
+            b_themis = float(data.get("budget_themis_logiciel_ht", 2800.0))
+            tot = b_web + b_secu + b_themis
+
+            subv_80 = (b_web + b_secu) * 0.80
+            subv_40 = b_themis * 0.40
+            subv_totale = min(subv_80 + subv_40, 10000.0)
+            rac = max(tot - subv_totale, 0.0)
+
+            # Insertion en base SQLite
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO dossiers_cheque_tic (
+                    nom_entreprise, forme_juridique, siret, code_naf, adresse_siege, commune,
+                    representant_legal, fonction_signataire, email_client, telephone_client,
+                    chiffre_affaires_actuel, douleur_actuelle, ambition_12_mois,
+                    budget_web_ht, budget_securite_ht, budget_themis_logiciel_ht,
+                    subvention_calculee, reste_a_charge_ht, statut_dossier, date_mandat, signature_electronique_validee
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Mandat Signé (Web)', ?, 1)
+                ON CONFLICT(siret) DO UPDATE SET
+                    nom_entreprise=excluded.nom_entreprise,
+                    telephone_client=excluded.telephone_client,
+                    email_client=excluded.email_client,
+                    douleur_actuelle=excluded.douleur_actuelle,
+                    ambition_12_mois=excluded.ambition_12_mois,
+                    date_mandat=excluded.date_mandat
+                """,
+                (
+                    nom_entreprise,
+                    data.get("forme_juridique", "SARL"),
+                    siret,
+                    data.get("code_naf", "6201Z"),
+                    data.get("adresse_siege", "Non renseignée"),
+                    commune,
+                    representant,
+                    data.get("fonction_signataire", "Gérant"),
+                    email,
+                    tel,
+                    float(data.get("chiffre_affaires_actuel", 60000.0)),
+                    data.get("douleur_actuelle", "Manque d'automatisation, devis chronophages."),
+                    data.get("ambition_12_mois", "Croissance du chiffre d'affaires et sécurisation des données."),
+                    b_web,
+                    b_secu,
+                    b_themis,
+                    subv_totale,
+                    rac,
+                    data.get("date_mandat", str(datetime.date.today())),
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            # Réponse 200 OK au site web
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "success": True,
+                "message": f"Dossier {nom_entreprise} intégré avec succès dans Themis ERP",
+                "subvention_estimee": subv_totale,
+                "reste_a_charge": rac
+            }).encode("utf-8"))
+
+        except Exception as e:
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+
+    # Masquer les logs HTTP intempestifs dans la console
+    def log_message(self, format, *args):
+        pass
+
+
+def demarrer_passerelle_themis():
+    """Démarre le serveur webhook d'écoute en arrière-plan."""
+    try:
+        server = HTTPServer(("0.0.0.0", PASSERELLE_PORT), MandatWebhookHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        print(f"📡 Passerelle THEMIS connectée et en écoute sur le port {PASSERELLE_PORT}")
+    except Exception as ex:
+        print(f"⚠️ Erreur démarrage passerelle : {ex}")
 
 # ---------------------------------------------------------------------------
 # Point d'entrée de l'application & Navigation Accordéon Stylisée
 # ---------------------------------------------------------------------------
 def main(page: ft.Page):
     init_db()
+    #demarrer_passerelle_themis()
 
     page.title = "Themis ERP - Micro-Entreprise & B2B"
     page.bgcolor = THEME.get("bg", "#F8FAFC")
@@ -4145,6 +5626,7 @@ def main(page: ft.Page):
         elif route == "/guide": content_area.content = view_livret_accueil(page)
         elif route == "/kanban": content_area.content = view_kanban(page)
         elif route == "/mco": content_area.content = view_mco_cockpit(page)
+        elif route == "/cheque_tic": content_area.content = view_cheque_tic(page)
         elif route == "/crm": content_area.content = view_crm_clients(page)
         elif route == "/catalogue": content_area.content = view_catalogue(page)
         elif route == "/devis": content_area.content = view_devis_form(page)
@@ -4155,140 +5637,141 @@ def main(page: ft.Page):
         elif route == "/livre_recettes": content_area.content = view_livre_recettes(page)
         elif route == "/depenses": content_area.content = view_depenses(page)
         elif route == "/settings": content_area.content = view_settings(page)
+        
+        # Ajout crucial : On met à jour la barre latérale pour illuminer le menu actif
+        update_sidebar() 
         page.update()
 
     page.on_route_change = route_change
 
+    # --- DÉBUT DE LA NOUVELLE BARRE LATÉRALE FLAT-RAIL ---
+    sidebar_expanded = True
+    
+    sidebar_container = ft.Container(
+        width=260,
+        bgcolor="#FFFFFF",
+        border=ft.border.only(right=ft.BorderSide(1, "#CBD5E1")),
+        padding=ft.padding.symmetric(horizontal=12, vertical=16),
+        animate=ft.animation.Animation(250, "decelerate"), # Animation fluide au déploiement
+    )
+
+    def toggle_sidebar(e):
+        nonlocal sidebar_expanded
+        sidebar_expanded = not sidebar_expanded
+        update_sidebar()
+
     def nav_sub_btn(icon, text, route):
-        """Bouton de navigation épuré avec surlignage émeraude actif."""
+        """Bouton adaptatif : Ghost effect si inactif, Émeraude si actif, réductible en mode icône."""
         is_active = (page.route == route)
         def click(e): page.go(route)
 
-        active_border = ft.border.only(left=ft.BorderSide(3.5, "#047857")) if is_active else None
+        active_border = ft.border.only(left=ft.BorderSide(3.5, "#047857")) if (is_active and sidebar_expanded) else None
+        
+        # L'effet Ghost (zéro fond si inactif)
+        bg_color = "#ECFDF5" if is_active else ft.colors.TRANSPARENT 
+        icon_color = "#047857" if is_active else "#64748B"
+        text_color = "#090D16" if is_active else "#475569"
 
         return ft.Container(
             content=ft.Row([
-                ft.Icon(
-                    icon, 
-                    size=16, 
-                    color="#047857" if is_active else "#64748B"
-                ),
-                ft.Text(
-                    text, 
-                    size=12, 
-                    weight=ft.FontWeight.W_800 if is_active else ft.FontWeight.W_600, 
-                    color="#090D16" if is_active else "#475569"
-                ),
-            ], spacing=12),
-            padding=ft.padding.symmetric(horizontal=12, vertical=8),
-            border_radius=ft.border_radius.only(top_right=8, bottom_right=8),
+                ft.Icon(icon, size=18, color=icon_color),
+                ft.Text(text, size=12, weight=ft.FontWeight.W_800 if is_active else ft.FontWeight.W_600, color=text_color, visible=sidebar_expanded),
+            ], spacing=12, alignment=ft.MainAxisAlignment.START if sidebar_expanded else ft.MainAxisAlignment.CENTER),
+            padding=ft.padding.symmetric(horizontal=12, vertical=10) if sidebar_expanded else ft.padding.all(10),
+            border_radius=ft.border_radius.only(top_right=8, bottom_right=8) if sidebar_expanded else 8,
             border=active_border,
-            bgcolor="#F1F5F9" if is_active else ft.colors.TRANSPARENT,
+            bgcolor=bg_color,
             on_click=click,
             ink=True,
+            tooltip=text if not sidebar_expanded else None
         )
 
-    def nav_accordion_section(title, icon, sub_buttons, is_open=True):
-        """Pôle de navigation accordéon corporate sobre et compact."""
-        return ft.ExpansionTile(
-            leading=ft.Container(
-                content=ft.Icon(icon, size=16, color="#05231A"),
-                bgcolor="#F1F5F9",
-                border_radius=6,
-                padding=5,
-            ),
-            title=ft.Text(
-                title,
-                size=12.5,
-                weight=ft.FontWeight.W_800,
-                color="#090D16",
-            ),
-            controls=sub_buttons,
-            initially_expanded=is_open,
-            dense=True,
-            tile_padding=ft.padding.symmetric(horizontal=8, vertical=2),
+    def section_title(text):
+        """En-tête textuel ultra-discret (sans icône, sans bordure)"""
+        return ft.Container(
+            content=ft.Text(text, size=10, weight=ft.FontWeight.W_800, color="#94A3B8"),
+            padding=ft.padding.only(left=12, top=16, bottom=4),
+            visible=sidebar_expanded
         )
+
+    def update_sidebar():
+        sidebar_container.width = 260 if sidebar_expanded else 72
+        sidebar_container.padding = ft.padding.symmetric(horizontal=12, vertical=16) if sidebar_expanded else ft.padding.symmetric(horizontal=8, vertical=16)
+        
+        b64_logo = get_app_logo_base64()
+        logo_widget = ft.Container(
+            content=ft.Image(src_base64=b64_logo, width=40 if sidebar_expanded else 32, height=40 if sidebar_expanded else 32, fit=ft.ImageFit.CONTAIN, border_radius=8) if b64_logo else ft.Icon(ft.icons.BALANCE_ROUNDED, color="#047857", size=28),
+            alignment=ft.alignment.center,
+        )
+
+        header_content = ft.Row([
+            logo_widget,
+            ft.Column([
+                ft.Text("THEMIS ERP", size=16, weight=ft.FontWeight.W_900, color="#090D16"),
+                ft.Text("SUITE COMMERCIALE", size=8, weight=ft.FontWeight.W_800, color="#047857"),
+            ], spacing=0, visible=sidebar_expanded),
+        ], spacing=12, alignment=ft.MainAxisAlignment.START if sidebar_expanded else ft.MainAxisAlignment.CENTER)
+
+        toggle_btn = ft.IconButton(
+            icon=ft.icons.MENU_OPEN_ROUNDED if sidebar_expanded else ft.icons.MENU_ROUNDED,
+            icon_color="#94A3B8",
+            icon_size=20,
+            on_click=toggle_sidebar,
+            tooltip="Réduire le menu" if sidebar_expanded else "Développer le menu",
+            style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=6))
+        )
+
+        # Disposition de l'en-tête selon le mode (Rail ou Élargi)
+        top_bar = ft.Row([header_content, toggle_btn], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+        if not sidebar_expanded:
+            top_bar = ft.Column([header_content, toggle_btn], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=15)
+
+        nav_items = [
+            top_bar,
+            ft.Divider(color="#E2E8F0", height=20),
+            
+            section_title("GÉNÉRAL"),
+            nav_sub_btn(ft.icons.DASHBOARD_ROUNDED, "Tableau de Bord", "/dashboard"),
+            nav_sub_btn(ft.icons.MENU_BOOK_ROUNDED, "Manuel d'Exploitation", "/guide"),
+            
+            section_title("PRODUCTION"),
+            nav_sub_btn(ft.icons.VIEW_KANBAN_ROUNDED, "Projets & Kanban (4P)", "/kanban"),
+            nav_sub_btn(ft.icons.HEALTH_AND_SAFETY_ROUNDED, "Cockpit MCO", "/mco"),
+            
+            section_title("COMMERCIAL"),
+            nav_sub_btn(ft.icons.ASSIGNMENT_ROUNDED, "Dossiers Chèque TIC", "/cheque_tic"),
+            nav_sub_btn(ft.icons.PEOPLE_ALT_ROUNDED, "Portefeuille & 360°", "/crm"),
+            nav_sub_btn(ft.icons.INVENTORY_2_ROUNDED, "Catalogue Prestations", "/catalogue"),
+            nav_sub_btn(ft.icons.DESCRIPTION_ROUNDED, "Devis & Contrats", "/devis"),
+            nav_sub_btn(ft.icons.ARCHIVE_ROUNDED, "Archives", "/archives"),
+            
+            section_title("FACTURATION"),
+            nav_sub_btn(ft.icons.GAVEL_ROUNDED, "Dossier Légal (7P)", "/dossier"),
+            nav_sub_btn(ft.icons.POST_ADD_ROUNDED, "Émettre Facture", "/factures"),
+            nav_sub_btn(ft.icons.RECEIPT_LONG_ROUNDED, "Aperçu & Factur-X", "/facturation_print"),
+            
+            section_title("FINANCE"),
+            nav_sub_btn(ft.icons.SAVINGS_ROUNDED, "Livre des Recettes", "/livre_recettes"),
+            nav_sub_btn(ft.icons.SHOPPING_BAG_ROUNDED, "Registre Dépenses", "/depenses"),
+            
+            section_title("SYSTÈME"),
+            nav_sub_btn(ft.icons.SETTINGS_ROUNDED, "Paramètres & Fiscalité", "/settings"),
+        ]
+        
+        sidebar_container.content = ft.Column(
+            controls=nav_items,
+            spacing=2,
+            scroll=ft.ScrollMode.AUTO,
+            horizontal_alignment=ft.CrossAxisAlignment.START if sidebar_expanded else ft.CrossAxisAlignment.CENTER
+        )
+
+        if sidebar_container.page:
+            sidebar_container.update()
 
     def build_sidebar():
-        """Sidebar porcelaine pure avec logo Themis et pôles institutionnels."""
-        b64_logo = get_app_logo_base64()
-        logo_widget = ft.Container()
-        if b64_logo:
-            logo_widget = ft.Container(
-                content=ft.Image(src_base64=b64_logo, width=48, height=48, fit=ft.ImageFit.CONTAIN, border_radius=8),
-                alignment=ft.alignment.center,
-                margin=ft.margin.only(bottom=6),
-            )
-
-        return ft.Container(
-            width=275,
-            bgcolor="#FFFFFF",
-            border=ft.border.only(right=ft.BorderSide(1, "#CBD5E1")),
-            padding=ft.padding.symmetric(horizontal=12, vertical=16),
-            content=ft.Column(
-                controls=[
-                    ft.Column([
-                        logo_widget,
-                        ft.Text("THEMIS ERP", size=18, weight=ft.FontWeight.W_900, color="#090D16"),
-                        ft.Text("SUITE COMMERCIALE & BANQUE PRIVÉE", size=8.5, weight=ft.FontWeight.W_700, color="#047857"),
-                    ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                    ft.Divider(color="#E2E8F0", height=20),
-                    
-                    # 1. Pôle Général
-                    nav_sub_btn(ft.icons.DASHBOARD_ROUNDED, "Tableau de Bord", "/dashboard"),
-                    nav_sub_btn(ft.icons.MENU_BOOK_ROUNDED, "Manuel d'Exploitation", "/guide"),
-                    ft.Container(height=4),
-
-                    # 2. Pôle Production & Ingénierie
-                    nav_accordion_section(
-                        "Production & Livrables", ft.icons.PRECISION_MANUFACTURING_ROUNDED,
-                        [
-                            nav_sub_btn(ft.icons.VIEW_KANBAN_ROUNDED, "Projets & Kanban (4P)", "/kanban"),
-                            nav_sub_btn(ft.icons.HEALTH_AND_SAFETY_ROUNDED, "Cockpit MCO & Abonnés", "/mco"),
-                        ],
-                        is_open=True,
-                    ),
-
-                    # 3. Pôle Commercial & CRM
-                    nav_accordion_section(
-                        "Commercial & Portefeuille", ft.icons.CONTACTS_ROUNDED,
-                        [
-                            nav_sub_btn(ft.icons.PEOPLE_ALT_ROUNDED, "Portefeuille & Fiches 360°", "/crm"),
-                            nav_sub_btn(ft.icons.INVENTORY_2_ROUNDED, "Catalogue Prestations", "/catalogue"),
-                            nav_sub_btn(ft.icons.DESCRIPTION_ROUNDED, "Créer / Modifier Devis", "/devis"),
-                            nav_sub_btn(ft.icons.ARCHIVE_ROUNDED, "Archiver / Supprimer", "/archives"),
-                        ],
-                        is_open=True,
-                    ),
-
-                    # 4. Pôle Facturation & Recouvrement
-                    nav_accordion_section(
-                        "Facturation & Contrats", ft.icons.GAVEL_ROUNDED,
-                        [
-                            nav_sub_btn(ft.icons.GAVEL_ROUNDED, "Dossier Contractuel (7P)", "/dossier"),
-                            nav_sub_btn(ft.icons.POST_ADD_ROUNDED, "Établir Facture / Avoir", "/factures"),
-                            nav_sub_btn(ft.icons.RECEIPT_LONG_ROUNDED, "Aperçu & Factur-X XML", "/facturation_print"),
-                        ],
-                        is_open=True,
-                    ),
-
-                    # 5. Pôle Finance & Réglementaire
-                    nav_accordion_section(
-                        "Finance & Fiscalité", ft.icons.ACCOUNT_BALANCE_ROUNDED,
-                        [
-                            nav_sub_btn(ft.icons.SAVINGS_ROUNDED, "Livre des Recettes (URSSAF)", "/livre_recettes"),
-                            nav_sub_btn(ft.icons.SHOPPING_BAG_ROUNDED, "Registre des Dépenses", "/depenses"),
-                        ],
-                        is_open=False,
-                    ),
-                    
-                    ft.Container(height=4),
-                    nav_sub_btn(ft.icons.SETTINGS_ROUNDED, "Paramètres & Fiscalité", "/settings"),
-                ],
-                spacing=3,
-                scroll=ft.ScrollMode.AUTO,
-            ),
-        )
+        update_sidebar()
+        return sidebar_container
+    # --- FIN DE LA NOUVELLE BARRE LATÉRALE FLAT-RAIL ---
 
     page.add(ft.Row(controls=[build_sidebar(), content_area], expand=True, spacing=0))
     page.go("/dashboard")
@@ -4298,4 +5781,5 @@ def main(page: ft.Page):
 # [POINT DE DÉMARRAGE DE L'APPLICATION]
 # ===========================================================================
 if __name__ == "__main__":
-    ft.app(target=main, view=ft.AppView.WEB_BROWSER)
+    port_flet = int(os.environ.get("PORT", 8080))
+    ft.app(target=main, view=ft.AppView.WEB_BROWSER, host="0.0.0.0", port=port_flet)
